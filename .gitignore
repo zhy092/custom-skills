@@ -1,0 +1,11 @@
+# Python
+**/.venv/
+**/__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# 打包产物
+*.skill
+*.zip

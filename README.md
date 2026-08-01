@@ -1,2 +1,28 @@
 # custom-skills
-WorkBuddy 自定义技能仓库 —— 存放我自己创建/改造的技能（如拆书播客 book-to-podcast、ima 知识库入库等）
+
+WorkBuddy 自定义技能仓库 —— 存放我自己创建 / 改造的技能。
+
+每个子目录是一个独立的 WorkBuddy 技能，可直接复制到 `~/.workbuddy/skills/<name>/` 使用。
+
+## 已收录技能
+
+### [book-to-podcast](./book-to-podcast/)
+一体化「拆书播客」技能：把任意格式的书籍（PDF / EPUB / MOBI / TXT / DOCX / HTML …）拆解成结构化知识要点，并自动生成多集**双人对话播客音频（MP3）**、逐集文稿与 RSS 订阅源，还能一键存入 ima 知识库「书籍播客」按书名归档。
+
+- 语音引擎：默认 `edge-tts`（免费、无需 API Key），另支持阿里云百炼 Qwen-TTS、火山引擎豆包、MiniMax、OpenAI。
+- 产物命名：`ep{序号}_{章节范围}_{主题}.mp3`（按真实章节拆分）。
+- 安装：把 `book-to-podcast/` 放进 `~/.workbuddy/skills/`，然后运行 `bash book-to-podcast/scripts/setup_env.sh`（自动建 venv 并装依赖，含完整静态 ffmpeg）。
+
+## 目录约定
+```
+custom-skills/
+├── README.md            # 本索引
+├── .gitignore           # 忽略 venv / 缓存
+└── <skill-name>/        # 每个技能一个目录
+    └── SKILL.md         # 技能说明（必需）
+```
+
+## 提交新技能
+1. 在仓库根目录新建 `<skill-name>/`，放入 `SKILL.md` 与脚本/资源；
+2. 更新本 README 的「已收录技能」列表；
+3. 提交并推送到 `main`。

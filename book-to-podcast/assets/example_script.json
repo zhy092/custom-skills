@@ -1,0 +1,97 @@
+{
+  "episode_id": "ep01",
+  "title": "为什么「稳定」是最危险的假象",
+  "language": "zh",
+  "engine": "edge",
+  "default_gap": 0.35,
+  "voices": {
+    "host": {
+      "edge": "zh-CN-YunxiNeural",
+      "aliyun": "Ethan",
+      "volcano": "BV700_streaming",
+      "openai": "ash",
+      "rate": "+6%"
+    },
+    "guest": {
+      "edge": "zh-CN-XiaoxiaoNeural",
+      "aliyun": "Elias",
+      "volcano": "BV701_streaming",
+      "openai": "sage"
+    }
+  },
+  "lines": [
+    {
+      "speaker": "host",
+      "text": "二零零八年之前，冰岛的银行系统被评为全球最稳定之一。三年后，它整个崩了。",
+      "pause_after": 0.8,
+      "chapter": "开场"
+    },
+    {
+      "speaker": "guest",
+      "text": "而同一时期，纽约街边那些看起来随时要倒闭的小馆子，活下来一大半。"
+    },
+    {
+      "speaker": "host",
+      "text": "这就有意思了。稳定的死了，脆弱的活了？"
+    },
+    {
+      "speaker": "guest",
+      "text": "对。塔勒布在《反脆弱》里说的就是这件事。他造了一个新词，因为语言里缺这个概念。",
+      "pause_after": 0.5,
+      "chapter": "核心概念"
+    },
+    {
+      "speaker": "host",
+      "text": "等一下。脆弱的反义词，不就是「强韧」吗？"
+    },
+    {
+      "speaker": "guest",
+      "text": "这正是他要纠正的误解。强韧是「打不坏」，受了冲击还是原样。反脆弱是「越打越强」，从冲击里获益。这是两回事。"
+    },
+    {
+      "speaker": "host",
+      "text": "能举个我们身边的例子吗？"
+    },
+    {
+      "speaker": "guest",
+      "text": "你去健身房举铁。肌肉纤维被撕出微小的裂口，身体修复的时候，会修得比原来更粗。",
+      "pause_after": 0.4
+    },
+    {
+      "speaker": "guest",
+      "text": "骨头也一样，承重之后密度会增加。适度的伤害，换来超出原状的恢复。这就是反脆弱。"
+    },
+    {
+      "speaker": "host",
+      "text": "所以关键不在「有没有受伤」，而在「受伤之后系统怎么反应」。",
+      "pause_after": 0.6
+    },
+    {
+      "speaker": "guest",
+      "text": "对。再看航空业。每出一次事故，全行业的规则就收紧一次，整体越来越安全。",
+      "chapter": "反直觉点"
+    },
+    {
+      "speaker": "guest",
+      "text": "但对那架飞机上的人来说，这是灭顶之灾。个体是脆弱的，系统是反脆弱的。"
+    },
+    {
+      "speaker": "host",
+      "text": "银行业恰好反过来——救助让每家银行都不倒，结果整个系统一次性崩塌。"
+    },
+    {
+      "speaker": "guest",
+      "text": "这就是那句反直觉的结论：长期没有小波动的系统，正在悄悄积累尾部风险。",
+      "pause_after": 1.0
+    },
+    {
+      "speaker": "host",
+      "text": "那今天能带走的一句话是什么？",
+      "chapter": "收尾"
+    },
+    {
+      "speaker": "guest",
+      "text": "去检查你身边那些「太平稳」的指标。平稳如果是靠不断干预换来的，那它不是安全，是欠账。"
+    }
+  ]
+}

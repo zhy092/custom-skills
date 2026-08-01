@@ -1,0 +1,102 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "Podcast Episode Script",
+  "description": "tts_render.py 接受的单集对话脚本格式",
+  "type": "object",
+  "required": ["episode_id", "title", "voices", "lines"],
+  "properties": {
+    "episode_id": {
+      "type": "string",
+      "description": "集号标识，如 ep01",
+      "pattern": "^[A-Za-z0-9_-]+$"
+    },
+    "title": { "type": "string", "description": "本集标题" },
+    "language": {
+      "type": "string",
+      "description": "输出语言码，如 zh / en / ja",
+      "default": "zh"
+    },
+    "engine": {
+      "type": "string",
+      "description": "TTS 引擎，可被命令行 --engine 覆盖",
+      "enum": ["edge", "aliyun", "volcano", "minimax", "openai", "say"],
+      "default": "edge"
+    },
+    "default_gap": {
+      "type": "number",
+      "description": "默认句间停顿秒数；换人说话自动 ×1.8",
+      "default": 0.35,
+      "minimum": 0,
+      "maximum": 3
+    },
+    "voices": {
+      "type": "object",
+      "description": "speaker 名 → 音色配置。键名需与 lines[].speaker 对应",
+      "minProperties": 1,
+      "additionalProperties": {
+        "oneOf": [
+          { "type": "string", "description": "直接给音色 ID（单引擎场景）" },
+          {
+            "type": "object",
+            "description": "按引擎分别配置，切引擎无需改脚本",
+            "properties": {
+              "voice": { "type": "string", "description": "通用兜底音色 ID" },
+              "edge": { "type": "string" },
+              "aliyun": { "type": "string" },
+              "volcano": { "type": "string" },
+              "minimax": { "type": "string" },
+              "openai": { "type": "string" },
+              "say": { "type": "string" },
+              "rate": { "type": "string", "description": "edge 语速，如 \"+6%\"" },
+              "pitch": { "type": "string", "description": "edge 音高，如 \"-2Hz\"" },
+              "volume": { "type": "string", "description": "edge 音量，如 \"+0%\"" },
+              "speed_ratio": { "type": "number", "description": "volcano 语速 0.2-3.0" },
+              "speed": { "type": "number", "description": "minimax/openai 语速" },
+              "model": { "type": "string", "description": "覆盖该引擎默认模型" },
+              "instructions": { "type": "string", "description": "aliyun instruct 系列 / openai 的风格指令" },
+              "language_type": { "type": "string", "description": "aliyun 语种提示，如 Chinese" }
+            }
+          }
+        ]
+      }
+    },
+    "lines": {
+      "type": "array",
+      "description": "对话行，按顺序合成。每行 20-120 字最佳",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "required": ["speaker", "text"],
+        "properties": {
+          "speaker": {
+            "type": "string",
+            "description": "必须是 voices 里已定义的键"
+          },
+          "text": {
+            "type": "string",
+            "description": "台词。数字写成朗读形态，勿含 Markdown 符号",
+            "minLength": 1
+          },
+          "pause_after": {
+            "type": "number",
+            "description": "本行结束后的额外停顿秒数",
+            "minimum": 0,
+            "maximum": 5
+          },
+          "chapter": {
+            "type": "string",
+            "description": "从本行开始一个新章节标记（需 ffmpeg 才会写入 MP3）"
+          },
+          "voice": {
+            "type": "string",
+            "description": "单行覆盖音色，用于客串/旁白"
+          },
+          "tts_opts": {
+            "type": "object",
+            "description": "单行覆盖引擎参数，如 {\"rate\": \"-10%\"} 做慢速强调"
+          }
+        }
+      }
+    }
+  }
+}
