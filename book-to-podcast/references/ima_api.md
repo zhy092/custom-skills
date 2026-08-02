@@ -37,6 +37,11 @@
 ```
 返回：`media_id`（下一步提交用）+ `cos_credential`。
 
+> **⚠️ WorkBuddy / MCP 调用须知（必读）**：`create_media` 与 `add_knowledge` 是 **deferred 工具**。
+> 不要把它们当普通工具直接调用——直接调用会被错误序列化，报 `Expected object, received string`。
+> 正确顺序：**先 `ToolSearch` 加载 schema → 再用 `DeferExecuteTool` 调用**，`params` 传 **JSON 对象**（不要包成字符串）。
+> 否则同一批文件里部分会拿到无效凭证（见下方 `InvalidAccessKeyId`）。
+
 ### cos_credential 字段 → cos-upload.cjs 参数映射
 | cos_credential 字段 | cos-upload.cjs 参数 |
 |---|---|
@@ -82,3 +87,12 @@ pdf→application/pdf；doc→application/msword；docx→application/vnd.openxm
 
 ## 上传失败兜底（硬性）
 超限 / 签名域错导致上传失败时：先读取 COS 返回的错误码判定原因 → 停止自动重试 → 明确告知用户（文件名 + 原因 + 建议手动上传到「书籍播客 / 书名」文件夹）→ 已成功入库的保留。禁止反复重试或盲目改签名"碰运气"。
+
+### `InvalidAccessKeyId`（HTTP 403）单独处理
+- 现象：同一批次其他文件 `cos-upload.cjs` 返回 `HTTP 200` 成功，**仅个别文件**报 `403 InvalidAccessKeyId: The Access Key Id you provided does not exist`。
+- 原因：那次 `create_media` 返回的临时凭证（`secret_id`/`secret_key`/`token`）**本身无效**，不是签名域漏签。
+- 修复（不要复用旧 media_id）：
+  1. **仅对该文件重新 `create_media`** 拿一份新凭证（会得到**新 media_id**）。
+  2. 用新凭证重跑 `cos-upload.cjs` → 应返回 `HTTP 200`。
+  3. `add_knowledge` 用**新 media_id** 提交。
+- 经验：长 token 一律经 Node 脚本（`subprocess` 列表传参）下发，绝不手写命令行，避免漏字符。
