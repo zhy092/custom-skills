@@ -71,4 +71,14 @@ pdf→application/pdf；doc→application/msword；docx→application/vnd.openxm
 ## 限制（连接器未暴露的接口）
 - ❌ 创建文件夹 / 删除 / 移动 / 重命名 —— 文件夹需用户在 ima 客户端手动建。
 - ❌ 上传后不可再整理（不可逆）。
-- ✅ 支持音频：单文件 ≤200MB、≤2 小时。
+- ✅ `create_media` 入参上限：单文件 ≤200MB、≤2 小时。
+- ⚠️ **COS STS 临时凭证实际单次上传上限约 100MB**（经验：39MB PDF 成功，191MB PDF 被 `AccessDenied` 拒绝；凭证有效、签名正确，纯因文件超上限）。**自动上传安全阈值 <100MB**；超限文件（高清扫描 PDF 常 150–200MB）请引导用户在 ima 客户端手动上传，不要自动重试。
+
+## COS 直传签名硬性要求（错一个就 403）
+- **上传主机**：必须用直连域名 `https://{bucket_name}.cos.{region}.myqcloud.com`，**不要用** `custom_domain`（CDN 域名）。
+- **签名 header 列表**：必须同时包含 `host` **和 `content-length`**（`q-header-list=host;content-length`）。只签 `host` 会被 COS 拒。
+- 本技能 `scripts/ima/cos-upload.cjs` 已按上述实现，**直接用它**传字节，不要自己重写上传器。
+- `start_time`/`expired_time` 必须原样透传 `create_media` 返回值，不要重新计算。
+
+## 上传失败兜底（硬性）
+超限 / 签名域错导致上传失败时：先读取 COS 返回的错误码判定原因 → 停止自动重试 → 明确告知用户（文件名 + 原因 + 建议手动上传到「书籍播客 / 书名」文件夹）→ 已成功入库的保留。禁止反复重试或盲目改签名"碰运气"。

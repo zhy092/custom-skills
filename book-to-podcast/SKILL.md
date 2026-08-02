@@ -80,6 +80,8 @@ agent_created: true
 | 5 | **丢掉命名规范** | 产出 `ep01.mp3` 而非 `ep01_第1-2章_主题.mp3` | 严格套用 `rename_by_chapter.py` |
 | 6 | **忘生成 RSS / shownotes** | 只有 mp3，没有 `podcast.xml` 和 `.md` 文稿 | `make_feed.py` + `shownotes_template.md` |
 | 7 | **试图 API 建 ima 文件夹** | 接口不存在 / 404 | 让用户手动建，你只负责按 folder_id 上传 |
+| 8 | **ima 上传 COS 签名错** | 403 `InvalidAccessKeyId`，误判"连接器坏了"反复换方式 | 直连 COS 域名 + 签 `host;content-length`（`cos-upload.cjs` 已对，直接用） |
+| 9 | **大文件超 STS 上限** | 191MB 被 `AccessDenied`；反复重试浪费时间 | 单文件 <100MB 才自动传；超限按兜底告知用户手动上传 |
 
 ### 写脚本与跑流程时还会踩的隐性坑（基于代码实测）
 
@@ -109,6 +111,19 @@ agent_created: true
 **F. 网络与连接器**
 - `edge` 引擎走微软在线端点，**离线/强沙箱环境会失败**；付费引擎同理需要出网。断网环境只能用 `say`（macOS 离线，但音质一般且产 AIFF，需 ffmpeg 合并）。
 - ima 上传需要 Node + `ima-mcp` 连接器；非 WorkBuddy 的 agent 没有连接器，阶段 8 无法完成。
+
+**G. ima 上传（COS 直传）专属坑 —— 必须按正确方式签，且注意文件大小上限**
+
+ima 连接器**没有"直接上传文件"的工具**。上传 = `create_media`（拿 COS 临时凭证）→ 客户端自签 PUT 到 COS → `add_knowledge`（归库）。自签 PUT 有两条致命细节，错一个就 403：
+
+1. **必须用直连 COS 域名，且签名要包含 `content-length`**：
+   - ✅ 正确：上传主机 = `https://{bucket}.cos.{region}.myqcloud.com`，签名 header 列表 = `host` **+ `content-length`**（本技能自带 `cos-upload.cjs` 就是这么签的，直接用它，不要自己实现）。
+   - ❌ 错误：`custom_domain`（CDN 域名）、或只签 `host` → COS 回 `403 InvalidAccessKeyId`（**不是密钥失效，是签名不匹配**）。
+   - 🐛 真实坑：曾用 `custom_domain` + 只签 `host` 上传，连续 6 轮都 403，一度误判"连接器坏了"；改成直连域名 + 签 `content-length` 后立刻 200。
+2. **STS 临时凭证有单次上传大小上限（约 100MB）**：
+   - ✅ 经验值：39MB PDF 成功；**191MB PDF 被 `AccessDenied` 拒绝**（凭证有效、签名正确，仅因文件超上限）。
+   - ⚠️ 安全阈值：单文件 **<100MB** 再走自动上传。ima 文档写的"≤200MB"是 `create_media` 入参上限，但 COS STS 凭证实际卡在 ~100MB，**以 ~100MB 为准**。
+   - 🐛 **超限处理（硬性）**：若大文件（如高清扫描 PDF 常 150–200MB）上传被 `AccessDenied` 拒绝，**立即停止自动重试**，按下面"阶段 8 失败兜底"告知用户原因并请其手动上传——不要无限重试、不要自己猜原因。
 
 ### 输出命名规范（硬性规则，不可省略）
 
@@ -284,7 +299,7 @@ $PY $S/make_feed.py --dir <工作目录>/output \
    `{"params":[{"type":"KBT_MINE_KB","limit":50,"cursor":""}]}`，找到目标 KB（默认「书籍播客」，
    `can_add_knowledge==true`）。
 2. **按书名建文件夹** ⚠️ **ima 连接器不暴露创建文件夹接口**，须用户在 ima 客户端 / 网页
-   手动新建（如 `世界上最最简单的会计书`），再告诉我文件夹名 → 我用
+   手动新建（如 `世界上最简单的会计书`），再告诉我文件夹名 → 我用
    `mcp__ima-mcp__get_knowledge_list`（加 `filters` 只列 FOLDER）自动识别 `folder_id`。
 3. 按 `ep01→epNN`（=章节顺序）逐文件入库音频，文件名保持 `ep{NN}_{章节范围}_{主题}.mp3` 原样
    （ima 以 `file_name` 作标题）。
@@ -299,6 +314,14 @@ $PY $S/make_feed.py --dir <工作目录>/output \
 5. 每文件（音频 + 源文件）三步：
    `create_media`（拿 COS 临时凭证）→ `cos-upload.cjs` 传字节 → `add_knowledge(folder_id)`。
 6. 回查 `mcp__ima-mcp__get_knowledge_list(folder_id=...)` 校验落位（音频 + 源文件都应出现）。
+
+**⚠️ 上传失败兜底（硬性规则）**
+- 若 `create_media` + `cos-upload.cjs` 上传报错，典型错误码与含义：
+  - `AccessDenied` → **文件超过 STS 凭证单次上传上限（约 100MB）**；
+  - `InvalidAccessKeyId` → 签名域名/header 错（应直连 COS 域名 + 签 `host;content-length`）；
+  - `403` 超时 → Bash 调用超时太短（大文件须 `--timeout 540000` + Bash ≥600000ms）。
+- **处理流程（硬性）**：① 先读 COS 返回的错误码判定原因，**不要盲目重试**；② 超限或签名域错 → **停止自动重试**；③ **明确告知用户**：哪本书、哪个文件、失败原因（如"源 PDF 191MB 超过 ima 单次上传上限约 100MB"）、建议操作（"请在 ima 客户端手动把该文件拖入『书籍播客 / 书名』文件夹"）；④ 已成功入库的文件照常保留，不回滚，其余小文件继续传。
+- ❌ **禁止**：超限文件反复重试、自己改写签名算法"碰运气"、不告知用户就跳过。
 
 详细字段 / 凭证映射 / MIME 对照 / 限制见 `references/ima_api.md`。**注意：ima 上传不可逆
 （不能移动/删除/重命名），确认无误再传。**
@@ -382,8 +405,9 @@ $PY $S/tts_render.py --script ep01.script.json --out-dir out --force
 | 合成音频没有停顿 | 缺 ffmpeg，装上重跑 `merge_audio.py`（无需重渲语音） |
 | 成片语速怪 / 念错字 | 回到脚本改文本，见 `script_writing.md` 第四节 TTS 友好规则 |
 | 渲染中断 | 直接重跑同一条命令，已完成片段自动复用 |
-| ima `create_media` 大小超限 | 确认 `file_size` 与磁盘字节数一致；单文件 ≤200MB、≤2 小时 |
-| COS 上传 403 / 签名错误 | 检查 `start_time/expired_time` 是否原样透传，不要重新计算 |
+| COS 上传 403 `InvalidAccessKeyId` | 签名域错：必须用直连 COS 域名 `bucket.cos.region.myqcloud.com` 且签名 header 含 `content-length`；不要用 `custom_domain` 或只签 `host`（`cos-upload.cjs` 已正确实现，直接用） |
+| COS 上传 `AccessDenied` | **文件超 STS 凭证单次上限（约 100MB）**：39MB 成功、191MB 被拒；超限请告知用户手动上传，不要重试 |
+| COS 上传 403 超时 | Bash 调用超时太短；大文件加 `--timeout 540000` 且 Bash 设 ≥600000ms |
 | ima 找不到文件夹 | 回到阶段 8 步骤 2，提示用户在 ima 客户端新建 |
 
 ---
