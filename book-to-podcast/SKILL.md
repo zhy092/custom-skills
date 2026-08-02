@@ -17,7 +17,7 @@ agent_created: true
 
 1. **拆解 + 合成**：解析 → 切块 → 精读 → 分集 → 写对话脚本 → 语音合成 → 拼接 → 生成 RSS。
 2. **总控编排**：`scripts/pipeline.py` 把确定性本地步骤（抽取/切块/合成/重命名/RSS）一键串起来。
-3. **ima 入库**：把成品音频按章节顺序上传到 ima 知识库指定文件夹（自带零依赖 `cos-upload.cjs` + MCP 工具流程）。
+3. **ima 入库**：把成品音频**和书籍源文件**按章节顺序上传到 ima 知识库指定文件夹（自带零依赖 `cos-upload.cjs` + MCP 工具流程）。
 
 **分工原则**：脚本负责确定性 I/O（解析、切块、语音合成、音频拼接、上传），
 模型负责智力工作（知识提炼、分集编排、口语化脚本写作）。不要试图让脚本"理解"书，
@@ -286,10 +286,19 @@ $PY $S/make_feed.py --dir <工作目录>/output \
 2. **按书名建文件夹** ⚠️ **ima 连接器不暴露创建文件夹接口**，须用户在 ima 客户端 / 网页
    手动新建（如 `世界上最最简单的会计书`），再告诉我文件夹名 → 我用
    `mcp__ima-mcp__get_knowledge_list`（加 `filters` 只列 FOLDER）自动识别 `folder_id`。
-3. 按 `ep01→epNN`（=章节顺序）逐文件入库，文件名保持 `ep{NN}_{章节范围}_{主题}.mp3` 原样
+3. 按 `ep01→epNN`（=章节顺序）逐文件入库音频，文件名保持 `ep{NN}_{章节范围}_{主题}.mp3` 原样
    （ima 以 `file_name` 作标题）。
-4. 每文件三步：`create_media`（拿 COS 临时凭证）→ `cos-upload.cjs` 传字节 → `add_knowledge(folder_id)`。
-5. 回查 `mcp__ima-mcp__get_knowledge_list(folder_id=...)` 校验落位。
+4. **把书籍源文件（原 PDF / EPUB / DOCX …）也上传到同一文件夹**（强烈推荐，便于在 ima 里对照原文与音频）：
+   - `create_media`：`file_name` 用**原文件名**（如 `世界上最简单的会计书(高清).pdf`）、
+     `content_type` 按扩展名查 `references/ima_api.md` 的 MIME 表（pdf→`application/pdf`）、
+     `file_size` **必须与磁盘字节数完全一致**，否则服务端拒收。
+   - `cos-upload.cjs` 传字节 → `add_knowledge(folder_id)`。
+   - 🐛 **真实坑**：扫描版 / 高清 PDF 源文件常达 100–200MB，`cos-upload.cjs` 默认 socket 超时 5 分钟，
+     大文件务必加 `--timeout 540000`；调用它的 Bash 命令也要设较长超时（如 600000ms），否则传到一半被切断。
+   - ⚠️ 上传不可逆，源文件名确认无误再传（建议保持原文件名，ima 以 file_name 作标题）。
+5. 每文件（音频 + 源文件）三步：
+   `create_media`（拿 COS 临时凭证）→ `cos-upload.cjs` 传字节 → `add_knowledge(folder_id)`。
+6. 回查 `mcp__ima-mcp__get_knowledge_list(folder_id=...)` 校验落位（音频 + 源文件都应出现）。
 
 详细字段 / 凭证映射 / MIME 对照 / 限制见 `references/ima_api.md`。**注意：ima 上传不可逆
 （不能移动/删除/重命名），确认无误再传。**
