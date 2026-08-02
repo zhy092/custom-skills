@@ -126,6 +126,16 @@ def read_pdf(path: Path) -> tuple[list[str], dict, list]:
     from pypdf import PdfReader
 
     reader = PdfReader(str(path))
+    if reader.is_encrypted:
+        # 很多"加密"PDF 其实是无密码加密，先试空密码；失败再明确报错
+        try:
+            if reader.decrypt("") == 0:
+                sys.exit(
+                    "[PDF 加密] 该 PDF 需要密码才能打开。请先去掉密码或提供无密码版本重试。\n"
+                    "  pypdf 可处理标准加密；若仍失败说明需要真实密码（本技能不存储密码）。"
+                )
+        except Exception:
+            sys.exit("[PDF 加密] 解密失败，请提供无密码的 PDF 版本。")
     pages = []
     for p in reader.pages:
         try:
@@ -458,8 +468,16 @@ def main() -> None:
 
     raw = "\n\n".join(p for p in parts if p and p.strip())
     if len(raw.strip()) < 200:
-        sys.exit("[失败] 几乎没抽到文字。若是扫描版 PDF，请先做 OCR"
-                 "（如 ocrmypdf in.pdf out.pdf）后重试。")
+        sys.exit(
+            "[失败] 几乎没抽到文字——这是扫描版/图片型 PDF（常见于 FreePic2Pdf 生成的文件，"
+            "文字层是空的）。\n"
+            "  ✅ 正确做法（视觉提取分支）：渲染页面图 + 用并行子代理读图，不要做 OCR。\n"
+            "    1) 装 poppler： macOS `brew install poppler` / Ubuntu `sudo apt install poppler-utils`\n"
+            "    2) 渲染全部页面： pdftoppm -r 200 <书>.pdf <工作目录>/_pages/p  （529 页≈100MB+，先确认磁盘够）\n"
+            "    3) 用并行子代理分批读图（每批 30~50 页）写笔记，再汇总 outline.json\n"
+            "  ❌ 不要尝试 tesseract OCR：macOS 编译极慢（常卡 30min+）且对中文扫描 PDF 效果差。\n"
+            "  （本技能的 scripts/ 不自动做视觉提取，这一步由 agent 用子代理完成。）"
+        )
 
     lang_info = detect_language(raw)
     if args.lang:

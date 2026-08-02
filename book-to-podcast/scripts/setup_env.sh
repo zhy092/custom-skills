@@ -121,6 +121,15 @@ else
   echo "   需要时: brew install --cask calibre  /  sudo apt install calibre"
 fi
 
+# ---- 6. poppler 检查（扫描版 PDF 视觉提取分支需要 pdftoppm）----------
+if command -v pdftoppm >/dev/null 2>&1; then
+  echo "✅ poppler pdftoppm: 可做扫描版 PDF 视觉提取（渲染页面图）"
+else
+  echo "ℹ️  未装 poppler —— 仅影响扫描版/坏文字层 PDF（需渲染页面图给子代理读）"
+  echo "    macOS : brew install poppler"
+  echo "    Linux : sudo apt install poppler-utils"
+fi
+
 echo ""
 echo "✅ 环境就绪"
 echo "   解释器: $VPY"

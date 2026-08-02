@@ -22,7 +22,11 @@ from pathlib import Path
 
 SKILL_DIR = Path(__file__).resolve().parent.parent   # .../book-to-podcast（技能根）
 S = SKILL_DIR / "scripts"
-PY = (SKILL_DIR / ".venv" / "bin" / "python").as_posix()  # 技能自带 venv
+# 技能自带 venv 解释器（跨平台：macOS/Linux 用 bin/python，Windows 用 Scripts/python.exe）
+_vpy = SKILL_DIR / ".venv" / "bin" / "python"
+if not _vpy.exists():
+    _vpy = SKILL_DIR / ".venv" / "Scripts" / "python.exe"
+PY = _vpy.as_posix()
 
 
 def run(cmd, cwd=None):

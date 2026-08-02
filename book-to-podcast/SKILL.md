@@ -25,6 +25,109 @@ agent_created: true
 
 ---
 
+## ⚠️ 前置条件、能力边界与已知坑（所有 agent 开工前必读）
+
+> **本节基于真实踩坑记录编写。** 以下状况均在 2026-08-01~02 的实际运行中复现过，
+> 不是理论推测。**开工前先逐条核对环境，缺一项就注定卡住。**
+
+### 你是谁？你能做到什么程度？
+
+| 运行环境 | 能力范围 | 必须具备的前提 |
+|---|---|---|
+| **WorkBuddy（本机）** | ✅ 全流程：解析 → 切块 → 精读 → 分集 → 脚本 → TTS → 拼接 → 重命名 → RSS → ima 入库 | `.venv` 已建、`ima-mcp` 连接器已连、可调用并行子代理 |
+| **其他 agent（Trae/Claude/通用）** | ⚠️ **有限可用**：①②③⑤（解析/切块/分集编排/写脚本）+ 调用脚本做⑥⑦（TTS/拼接/RSS） | 能执行 bash / Python、有 `.venv` 或系统 ffmpeg + edge-tts |
+| **无运行环境的纯文本 agent** | ❌ 只能做④⑤（读 chunk 写笔记/编 episodes/写 script.json） | 能读写文件即可 |
+
+**关键结论：阶段 8（ima 入库）只有 WorkBuddy + ima-mcp 连接器能完成。**
+其他 agent 做到阶段 7（产出本地 mp3 + podcast.xml）就是终点。
+
+### 开工前自检清单（逐项打勾）
+
+- [ ] **Python venv 就位**：`<技能目录>/.venv/bin/python` 存在且能跑。
+  - ❌ 缺失 → 执行 `bash <技能目录>/scripts/setup_env.sh`（只需一次）。
+  - ⚠️ **不要用系统 Python**——核心依赖（`pypdf`、`edge-tts`、`rich` 等）装在 venv 里。
+  - 🐛 **真实坑**：有 agent 尝试用系统 Python 跑脚本 → `ModuleNotFoundError` → 然后自己手写解析代码 → 编码/章节识别全崩。
+- [ ] **ffmpeg 可用**：`.venv` 内的 `imageio-ffmpeg` 静态二进制已装（`setup_env.sh` 默认安装）。
+  - ❌ 缺失 → 音频没有停顿、没有 ID3 标签、没有章节标记、响度不标准化。
+  - ⚠️ **不要尝试装系统 ffmpeg 或编译 tesseract**——tesseract 在 macOS 上编译极慢（实测卡在 dependency-download 阶段超过 30 分钟），且对中文扫描 PDF 效果差。
+  - 🐛 **真实坑**：某 agent 先尝试编译 tesseract → 卡死 → 被迫跳过；ffmpeg 显示❌没装好 → 后来才发现 `imageio-ffmpeg` 其实已经可用，只是检测逻辑有问题。
+- [ ] **TTS 引擎确认**：
+  - 默认 `edge-tts`（免费、无需 API Key、已随 venv 安装）→ **直接能用，不要换引擎**。
+  - ⚠️ 若用户要求付费引擎（阿里云/火山/OpenAI）→ 必须先确认对应 `API_KEY`/`ACCESS_TOKEN` 环境变量存在，否则 401/403。
+  - 🐛 **真实坑**：有 agent 默认去调 Azure/阿里云 TTS → 没 Key → 403 → 浪费大量时间排查。
+- [ ] **PDF 类型判定**（仅 PDF 书籍需要）：
+  - 先跑 `extract_book.py`，看 `book.txt` 是否有有效文字。
+  - ✅ 有文字层 → 正常流程。
+  - ❌ 只有水印/乱码（常见于 FreePic2Pdf 生成的 PDF、扫描版、图片型 PDF）→ **立即切到视觉提取分支**：
+    1. `pdftoppm -r 200` 渲染全部页面为 PNG（529 页 ≈ 103MB，磁盘空间要够）
+    2. 用**并行子代理**分批读图（每批 30~50 页），每页输出结构化笔记
+    3. **绝对不要**尝试 tesseract OCR（效果差、编译慢）或手写正则提取（抽不到东西）
+  - 🐛 **真实坑**：《世界上最简单的会计书》PDF 无文字层 → agent 花了大量时间在 tesseract 编译和重试上，最终还是要走视觉子代理；另一本书 529 页渲染出 103MB 图片 + 18 个 AI 智能体分波读取才完成。
+- [ ] **ima 入库前提**（仅当用户要求存入 ima 时）：
+  - ✅ `ima-mcp` 连接器已连接且 `can_add_knowledge==true`
+  - ✅ 用户已在 ima 客户端/网页**手动创建好书名文件夹**（ima 无 API 建文件夹）
+  - ⚠️ **上传不可逆**——不能移动/删除/重命名，确认文件名正确再传
+  - ❌ 其他 agent 没有 ima-mcp → 这步**无法完成**，告知用户改用手动上传或回 WorkBuddy 做
+
+### 其他 agent 最容易踩的 Top 7 坑
+
+| # | 坪 | 症状 | 正确做法 |
+|---|---|---|---|
+| 1 | **不用 venv / 用系统 Python** | `ModuleNotFoundError`，然后手写代码重造轮子 | 始终用 `<技能目录>/.venv/bin/python` |
+| 2 | **坏文字层 PDF 死磕 OCR** | tesseract 编译卡死 / 抽出乱码 / 反复重试 | 直接走视觉子代理读图分支 |
+| 3 | **ffmpeg 装错位置** | `ffmpeg: command not found`，音频无停顿 | 用 venv 内的 `imageio-ffmpeg`，不装系统版 |
+| 4 | **TTS 引擎选了付费但没 Key** | 401/403，反复查配置 | 默认 edge-tts，除非用户明确给 Key |
+| 5 | **丢掉命名规范** | 产出 `ep01.mp3` 而非 `ep01_第1-2章_主题.mp3` | 严格套用 `rename_by_chapter.py` |
+| 6 | **忘生成 RSS / shownotes** | 只有 mp3，没有 `podcast.xml` 和 `.md` 文稿 | `make_feed.py` + `shownotes_template.md` |
+| 7 | **试图 API 建 ima 文件夹** | 接口不存在 / 404 | 让用户手动建，你只负责按 folder_id 上传 |
+
+### 写脚本与跑流程时还会踩的隐性坑（基于代码实测）
+
+**A. 脚本 JSON（阶段 5，render 失败的第一大元凶）**
+- **`episode_id` 必须以 `epNN` 开头、且脚本文件必须叫 `ep01.script.json`**：`rename_by_chapter.py` 用正则 `ep\d+` 匹配文件名来重命名。若写 `"episode_id":"第1集"` 或文件叫 `ch1.script.json`，render 出的 `output/ep01.mp3` 不会被重命名，章节命名规范直接失效。
+- **`voices` 的键必须和每行 `lines[].speaker` 完全一致**：写 `"speaker":"host"` 但 voices 里只定义了 `"narrator"` → 直接报 `speaker 未在 voices 中定义`。
+- **edge 音色必须用真实 ShortName**（如 `zh-CN-XiaoxiaoNeural`）：瞎猜名字 edge_tts 会报错。开渲前先跑 `tts_render.py --list-voices --engine edge --lang zh` 取真实列表。
+- **数字/符号写成朗读形态**：`5美元` 别写 `5`；`clean_for_tts` 会自动剥掉 Markdown 记号和 `(笑)(停顿)` 等舞台提示——脚本里别依赖它们被念出来。
+- **每集先单独渲 ep01 试听**，确认音色/语速再批量跑（脚本自带断点续渲，重跑复用缓存）。
+
+**B. 合成与拼接（阶段 6）**
+- **混用非 MP3 引擎又没 ffmpeg 会直接崩**：`say` 产 AIFF、`aliyun` 可能产 WAV，纯 Python 兜底拼接只认 MP3。用这些引擎务必保证 ffmpeg 在（venv 内的 imageio-ffmpeg 即可）。
+- **`merge_audio.py` 的停顿/响度/BGM/章节标记全部依赖 ffmpeg**：ffmpeg 缺失时只有"能出声"，没有任何精细控制。
+
+**C. 流程顺序（阶段 4→5→6.5→7）**
+- 顺序不可乱：**先写 `episodes.json`（含 id/chapter_range/topic）→ 写 `scripts/epNN.script.json` → render → `rename_by_chapter.py` → `make_feed.py`**。`rename_by_chapter.py` 必须能读到 `episodes.json`，否则跳过/保持原名。
+- **`make_feed.py` 必传 `--title`、建议传 `--base-url`**：不传 base-url 时 RSS 的 enclosure 是相对路径，外部播客客户端无法订阅（脚本会打印提示）。要真订阅需挂 HTTP 服务。
+
+**D. 扫描版 PDF 视觉提取（坏文字层时）**
+- **必须装 poppler**（`pdftoppm`）：macOS `brew install poppler`、Linux `sudo apt install poppler-utils`。`setup_env.sh` 会检测并提醒，但**不会自动装**——这一步要你手动来。
+- **磁盘要够**：529 页渲染成图约 100MB+；并行子代理建议每批 30~50 页。**没有并行子代理能力的 agent 做不了这步**——直接判定"本环境无法处理扫描版 PDF"。
+- **绝不做 tesseract OCR**：编译极慢且中文效果差。抽不到文字时脚本会明确提示走视觉分支（不再误导去装 ocrmypdf）。
+
+**E. 加密 PDF**
+- 标准加密 PDF（含"无密码加密"）pypdf 可直接解密；**真密码保护的 PDF 需要你提供无密码版本**，本技能不存储密码。
+
+**F. 网络与连接器**
+- `edge` 引擎走微软在线端点，**离线/强沙箱环境会失败**；付费引擎同理需要出网。断网环境只能用 `say`（macOS 离线，但音质一般且产 AIFF，需 ffmpeg 合并）。
+- ima 上传需要 Node + `ima-mcp` 连接器；非 WorkBuddy 的 agent 没有连接器，阶段 8 无法完成。
+
+### 输出命名规范（硬性规则，不可省略）
+
+```
+ep{NN}_{章节范围}_{主题}.mp3          # 成品音频
+ep{NN}_{章节范围}_{主题}.md            # 单集文稿（与音频同名）
+```
+
+示例：
+- `ep01_学前测验+第1章_会计基本等式与资产负债表.mp3`
+- `ep02_第2-3章_毛利与留存收益.mp3`
+- `ep06_第9-10章_税金与最后分析.mp3`
+
+- 章节范围 = 书的真实章节名（如 `第2-3章`、`第4章`、`学前测验+第1章`）
+- 主题 = 该集核心内容短语（从 `episodes.json` 的 `topic` 字段取）
+- **RSS `<title>` 和 ima 上传的 `file_name` 都用这个格式**
+
+---
+
 ## 环境准备（首次使用执行一次）
 
 ```bash

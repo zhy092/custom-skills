@@ -13,6 +13,13 @@ WorkBuddy 自定义技能仓库 —— 存放我自己创建 / 改造的技能�
 - 产物命名：`ep{序号}_{章节范围}_{主题}.mp3`（按真实章节拆分）。
 - 安装：把 `book-to-podcast/` 放进 `~/.workbuddy/skills/`，然后运行 `bash book-to-podcast/scripts/setup_env.sh`（自动建 venv 并装依赖，含完整静态 ffmpeg）。
 
+### [github-skill-store](./github-skill-store/)
+技能分发与版本管理工具：把本地 WorkBuddy 技能**一键推送到 GitHub 仓库**（`zhy092/custom-skills`），支持新增 / 更新、自动排除 `.venv` 等缓存文件、维护 README 索引。
+
+- 适用场景：用户说"把技能存到 GitHub""push 到 github""归档这个技能"时调用。
+- 跨平台支持：macOS 钥匙串 / 环境变量 `GITHUB_TOKEN` / `gh auth token` / `~/.git-credentials` 四种取 Token 方式。
+- 安全：Token 仅存在于 shell 变量，推送后清理临时目录，不残留凭据。
+
 ## 目录约定
 ```
 custom-skills/
