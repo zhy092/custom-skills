@@ -1,7 +1,7 @@
 ---
 name: github-skill-store
 description: 把 WorkBuddy 技能（目录）存入用户的 GitHub 仓库 zhy092/custom-skills。当用户说"把技能存到 GitHub""新增技能到我的仓库""push 技能到 github""归档这个技能"时使用。技能本身可由本机 ~/.workbuddy/skills/<name>/ 提供，也可从其他路径传入。
-version: 1.1.0
+version: 1.2.0
 author: zhy
 tags: [github, skill-distribution, version-control]
 category: devops
@@ -54,6 +54,7 @@ license: MIT
 | 8 | **忘记推 GitHub** | 本地更新了但 GitHub 仓库还是旧的 | 用户认可沉淀后，必须走一遍本技能的 push 流程 |
 | 9 | **仓库 `.gitignore` 缺失或不全** | venv/pyc/.DS_Store 被提交上去 | 首次建仓时补 `.gitignore`（见下方模板） |
 | 10 | **commit 时没设 user.name/email** | git 报 `Please tell me who you are` | 用 `-c user.name=` `-c user.email=` 内联指定，不改全局配置 |
+| 11 | **README 索引追加到文件末尾** | 新技能条目出现在“已收录技能”列表之外，GitHub 上看不到 | 用脚本插入到 `## 已收录技能` 标题下，格式为 `### [name](./name/)` |
 
 ### 输出规范
 
@@ -182,16 +183,42 @@ cat > .gitignore << 'EOF'
 *token*
 EOF
 
-# README 追加新技能条目（如果还没有的话）
-if ! grep -q "<name>" README.md; then
-  cat >> README.md << 'EOF'
+# README 索引更新（用 Node 插入到“已收录技能”列表下，避免追加到末尾导致不显示）
+node << 'NODE'
+const fs = require('fs');
+const name = '<name>';                        // 实际使用时替换
+const title = '<中文名称>';                    // 实际使用时替换
+const desc = '一句话描述该技能的功能。';        // 实际使用时替换
+const bullets = [
+  '适用场景：用户在什么情况下会调用这个技能。',
+  '关键特性 / 核心能力：列出 2–3 个亮点。',
+];
 
-## <name>
-> 一句话描述该技能的功能
-- [查看](./<name>/)
-EOF
-fi
+const entry = `\\n### [${title || name}](./${name}/)\\n${desc}\\n\\n${bullets.map(b => `- ${b}`).join('\\n')}\\n`;
+
+let readme = fs.readFileSync('README.md', 'utf8');
+
+// 如果存在旧格式错误条目（如末尾的 ## <name>），先删掉
+readme = readme.replace(new RegExp(`\\n##\\s+${name}\\n[\\s\\S]*?(?=\\n## |\\n### |\\n--- |\\n$|$)`), '\\n');
+
+// 确保有“已收录技能”区块
+if (!readme.includes('## 已收录技能')) {
+  readme += `\\n\\n## 已收录技能\\n`;
+}
+
+// 如果还没以正确格式收录，则插入到“已收录技能”标题之后的第一行
+const marker = '## 已收录技能\\n';
+if (!readme.includes(`### [${title || name}](./${name}/)`)) {
+  const idx = readme.indexOf(marker) + marker.length;
+  readme = readme.slice(0, idx) + entry + readme.slice(idx);
+}
+
+fs.writeFileSync('README.md', readme);
+console.log('README 索引已更新');
+NODE
 ```
+
+> **坑**：用 `cat >> README.md` 把新技能追加到文件末尾，会导致它**不在“已收录技能”列表里显示**，格式也不统一。必须插入到 `## 已收录技能` 标题下，并用 `### [name](./name/)` 格式。
 
 ### 5. 提交并推送
 
