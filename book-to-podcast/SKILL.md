@@ -112,6 +112,14 @@ agent_created: true
 - `edge` 引擎走微软在线端点，**离线/强沙箱环境会失败**；付费引擎同理需要出网。断网环境只能用 `say`（macOS 离线，但音质一般且产 AIFF，需 ffmpeg 合并）。
 - ima 上传需要 Node + `ima-mcp` 连接器；非 WorkBuddy 的 agent 没有连接器，阶段 8 无法完成。
 
+**edge-tts 偶发 400 的抗造渲染（重要）**：免费端点偶发返回 `400 invalid parameter value`（非内容问题，约每 80 句 1 句）。
+`pipeline.py render` 在任一集渲染失败时会整体 `sys.exit`，导致后续集不渲染、未完成的集不合并——一次崩全盘。
+正确做法（救法与预防）：
+1. 失败句对应的 `seg_XXXX.mp3` 是 0 字节，删掉它；
+2. `tts_render.py` 自带断点续渲（以 `size>0` 判缓存，已正常的句自动跳过），只重渲失败句；
+3. 用**外层重试循环**包住整条管线（每集最多 8 轮、每轮 `--retries 10 --concurrency 2`），跑完所有集再统一 `merge → rename → make_feed`。
+这样单次抖动不会中断全流程，也不浪费已渲染的片段。
+
 **G. ima 上传（COS 直传）专属坑 —— 必须按正确方式签，且注意文件大小上限**
 
 ima 连接器**没有"直接上传文件"的工具**。上传 = `create_media`（拿 COS 临时凭证）→ 客户端自签 PUT 到 COS → `add_knowledge`（归库）。自签 PUT 有两条致命细节，错一个就 403：
@@ -303,6 +311,7 @@ $PY $S/make_feed.py --dir <工作目录>/output \
    `mcp__ima-mcp__get_knowledge_list`（加 `filters` 只列 FOLDER）自动识别 `folder_id`。
 3. 按 `ep01→epNN`（=章节顺序）逐文件入库音频，文件名保持 `ep{NN}_{章节范围}_{主题}.mp3` 原样
    （ima 以 `file_name` 作标题）。
+   - ⚠️ **`folder_id` 必须精确无误**：它是长串字符（如 `folder_7494237180399974`），**务必从配置/变量读取或粘贴后逐位核对**，绝不在多个 `add_knowledge` 调用里逐条手写——手误一位就会报「文件夹不存在」，且只影响那一个文件，极难排查。建议把 `folder_id` 存进一个变量，6 个调用共用。
 4. **把书籍源文件（原 PDF / EPUB / DOCX …）也上传到同一文件夹**（强烈推荐，便于在 ima 里对照原文与音频）：
    - `create_media`：`file_name` 用**原文件名**（如 `世界上最简单的会计书(高清).pdf`）、
      `content_type` 按扩展名查 `references/ima_api.md` 的 MIME 表（pdf→`application/pdf`）、
@@ -405,6 +414,8 @@ $PY $S/tts_render.py --script ep01.script.json --out-dir out --force
 | 合成音频没有停顿 | 缺 ffmpeg，装上重跑 `merge_audio.py`（无需重渲语音） |
 | 成片语速怪 / 念错字 | 回到脚本改文本，见 `script_writing.md` 第四节 TTS 友好规则 |
 | 渲染中断 | 直接重跑同一条命令，已完成片段自动复用 |
+| edge-tts 偶发 `400 invalid parameter` | 免费端点网络抖动（约每 80 句 1 句，非内容问题），`pipeline.py render` 默认 3 次重试后整体 `sys.exit`，会中断后续集渲染、未完成集不合并；救法：删掉 0 字节段 → 断点续渲（`tts_render` 以 `size>0` 判缓存，已正常的句跳过）→ 外层重试循环包住整条管线（如每集最多 8 轮、每轮 `--retries 10`），跑完所有集再统一合并+重命名+RSS |
+| ima `add_knowledge` 报「文件夹不存在」 | `folder_id` 手误/写错（如 `999974`↔`0399974`）→ 该集未入库；核对 `folder_id` 后用正确值重提 `add_knowledge` 即可，无需重传字节 |
 | COS 上传 403 `InvalidAccessKeyId` | 签名域错：必须用直连 COS 域名 `bucket.cos.region.myqcloud.com` 且签名 header 含 `content-length`；不要用 `custom_domain` 或只签 `host`（`cos-upload.cjs` 已正确实现，直接用） |
 | COS 上传 `AccessDenied` | **文件超 STS 凭证单次上限（约 100MB）**：39MB 成功、191MB 被拒；超限请告知用户手动上传，不要重试 |
 | COS 上传 403 超时 | Bash 调用超时太短；大文件加 `--timeout 540000` 且 Bash 设 ≥600000ms |
