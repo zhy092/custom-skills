@@ -33,3 +33,7 @@ custom-skills/
 1. 在仓库根目录新建 `<skill-name>/`，放入 `SKILL.md` 与脚本/资源；
 2. 更新本 README 的「已收录技能」列表；
 3. 提交并推送到 `main`。
+
+## github-actions-cleanup
+> 排查并清理 GitHub 账户的 Actions 存储占用（artifacts 构建产物 + caches 依赖缓存），释放 0.5GB 免费配额。
+- [查看](./github-actions-cleanup/)
