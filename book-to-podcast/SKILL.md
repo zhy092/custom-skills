@@ -316,7 +316,7 @@ $PY $S/make_feed.py --dir <工作目录>/output \
    - `create_media`：`file_name` 用**原文件名**（如 `世界上最简单的会计书(高清).pdf`）、
      `content_type` 按扩展名查 `references/ima_api.md` 的 MIME 表（pdf→`application/pdf`）、
      `file_size` **必须与磁盘字节数完全一致**，否则服务端拒收。
-   - `cos-upload.cjs` 传字节 → `add_knowledge(folder_id)`。
+   - `cos-upload.cjs` 传字节（⚠️ **必须传 `--start-time`/`--expired-time`**，取自 `create_media` 返回的 `start_time`/`expired_time`；否则本机时钟若慢于真实时间，签名会落在 STS 生效窗口外，报 `InvalidAccessKeyId`）→ `add_knowledge(folder_id)`。
    - 🐛 **真实坑**：扫描版 / 高清 PDF 源文件常达 100–200MB，`cos-upload.cjs` 默认 socket 超时 5 分钟，
      大文件务必加 `--timeout 540000`；调用它的 Bash 命令也要设较长超时（如 600000ms），否则传到一半被切断。
    - ⚠️ 上传不可逆，源文件名确认无误再传（建议保持原文件名，ima 以 file_name 作标题）。
@@ -327,7 +327,7 @@ $PY $S/make_feed.py --dir <工作目录>/output \
 **⚠️ 上传失败兜底（硬性规则）**
 - 若 `create_media` + `cos-upload.cjs` 上传报错，典型错误码与含义：
   - `AccessDenied` → **文件超过 STS 凭证单次上传上限（约 100MB）**；
-  - `InvalidAccessKeyId` → 签名域名/header 错（应直连 COS 域名 + 签 `host;content-length`）；
+  - `InvalidAccessKeyId` → STS **时间窗口错**（最常见）：本机时钟慢于真实时间时 `cos-upload.cjs` 默认 `Date.now()` 签名落在凭证 `start_time` 生效窗口外，腾讯云判定临时 AKID 无效；**必须用 `create_media` 返回的 `start_time`/`expired_time` 作 `--start-time`/`--expired-time` 签名**；另临时 `secret_id` 漏字符也会触发，须整段完整复制。
   - `403` 超时 → Bash 调用超时太短（大文件须 `--timeout 540000` + Bash ≥600000ms）。
 - **处理流程（硬性）**：① 先读 COS 返回的错误码判定原因，**不要盲目重试**；② 超限或签名域错 → **停止自动重试**；③ **明确告知用户**：哪本书、哪个文件、失败原因（如"源 PDF 191MB 超过 ima 单次上传上限约 100MB"）、建议操作（"请在 ima 客户端手动把该文件拖入『书籍播客 / 书名』文件夹"）；④ 已成功入库的文件照常保留，不回滚，其余小文件继续传。
 - ❌ **禁止**：超限文件反复重试、自己改写签名算法"碰运气"、不告知用户就跳过。
@@ -416,7 +416,7 @@ $PY $S/tts_render.py --script ep01.script.json --out-dir out --force
 | 渲染中断 | 直接重跑同一条命令，已完成片段自动复用 |
 | edge-tts 偶发 `400 invalid parameter` | 免费端点网络抖动（约每 80 句 1 句，非内容问题），`pipeline.py render` 默认 3 次重试后整体 `sys.exit`，会中断后续集渲染、未完成集不合并；救法：删掉 0 字节段 → 断点续渲（`tts_render` 以 `size>0` 判缓存，已正常的句跳过）→ 外层重试循环包住整条管线（如每集最多 8 轮、每轮 `--retries 10`），跑完所有集再统一合并+重命名+RSS |
 | ima `add_knowledge` 报「文件夹不存在」 | `folder_id` 手误/写错（如 `999974`↔`0399974`）→ 该集未入库；核对 `folder_id` 后用正确值重提 `add_knowledge` 即可，无需重传字节 |
-| COS 上传 403 `InvalidAccessKeyId` | 签名域错：必须用直连 COS 域名 `bucket.cos.region.myqcloud.com` 且签名 header 含 `content-length`；不要用 `custom_domain` 或只签 `host`（`cos-upload.cjs` 已正确实现，直接用） |
+| COS 上传 403 `InvalidAccessKeyId` | **STS 临时凭证签名时间窗口错（最常见根因）**：`cos-upload.cjs` 默认用本机 `Date.now()` 做签名窗口，若**本机系统时钟慢于真实时间**（哪怕慢几分钟），签名时间会落在 `create_media` 返回的 `start_time` 生效窗口之外，腾讯云直接判定该临时 AKID 无效。救法：把 `create_media` 返回的 `start_time`/`expired_time` 作为 `--start-time`/`--expired-time` 传给 `cos-upload.cjs` 再签名（绝不用默认 Date.now）；若仍偶发 403，sleep 15s 重试（ima↔腾讯云 凭证传播有秒级延迟）。另：`create_media` 返回的 `secret_id` 是临时 AKID，**必须整段完整复制**，漏一位字符同样报 InvalidAccessKeyId |
 | COS 上传 `AccessDenied` | **文件超 STS 凭证单次上限（约 100MB）**：39MB 成功、191MB 被拒；超限请告知用户手动上传，不要重试 |
 | COS 上传 403 超时 | Bash 调用超时太短；大文件加 `--timeout 540000` 且 Bash 设 ≥600000ms |
 | ima 找不到文件夹 | 回到阶段 8 步骤 2，提示用户在 ima 客户端新建 |
