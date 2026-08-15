@@ -20,6 +20,13 @@ WorkBuddy 自定义技能仓库 —— 存放我自己创建 / 改造的技能�
 - 跨平台支持：macOS 钥匙串 / 环境变量 `GITHUB_TOKEN` / `gh auth token` / `~/.git-credentials` 四种取 Token 方式。
 - 安全：Token 仅存在于 shell 变量，推送后清理临时目录，不残留凭据。
 
+### [github-actions-cleanup](./github-actions-cleanup/)
+排查并清理 GitHub 账户的 Actions 存储占用（artifacts 构建产物 + caches 依赖缓存），释放 0.5GB 免费配额。
+
+- 适用场景：收到 GitHub "Actions storage 已用 X%" 告警、询问"哪个仓库占用 Actions 空间 / 存储满了 / 清理 Actions 缓存"时调用。
+- 安全原则：仅删除 expired artifact 和 caches；active artifact 需用户确认；正在写入的 artifact 跳过。
+- 延迟提醒：删除后 GitHub Billing 仪表盘可能有 5–30 分钟延迟，不代表删除失败。
+
 ## 目录约定
 ```
 custom-skills/
