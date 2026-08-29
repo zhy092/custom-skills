@@ -42,8 +42,18 @@
 > 正确顺序：**先 `ToolSearch` 加载 schema → 再用 `DeferExecuteTool` 调用**，`params` 传 **JSON 对象**（不要包成字符串）。
 > 否则同一批文件里部分会拿到无效凭证（见下方 `InvalidAccessKeyId`）。
 
-### cos_credential 字段 → cos-upload.cjs 参数映射
-| cos_credential 字段 | cos-upload.cjs 参数 |
+### cos_credential 字段 → ima_cos_upload.js 参数映射
+> 上传器已重写为 `scripts/ima_cos_upload.js`（基于官方 `cos-nodejs-sdk-v5`，替代早期丢失的 `cos-upload.cjs`）。它直接吃 `create_media` 返回的 STS 凭证，无需手写签名。
+
+| cos_credential 字段 | ima_cos_upload.js 对应 |
+|---|---|
+| `secret_id` | `COS({SecretId})` |
+| `secret_key` | `COS({SecretKey})` |
+| `token` | `COS({XCosSecurityToken})` |
+| `bucket_name` | `putObject({Bucket})` |
+| `region` | `putObject({Region})` |
+| `cos_key` | `putObject({Key})` |
+| `start_time` / `expired_time` | 透传给 SDK（不要重算） |
 |---|---|
 | `secret_id` | `--secret-id` |
 | `secret_key` | `--secret-key` |
@@ -82,7 +92,7 @@ pdf→application/pdf；doc→application/msword；docx→application/vnd.openxm
 ## COS 直传签名硬性要求（错一个就 403）
 - **上传主机**：必须用直连域名 `https://{bucket_name}.cos.{region}.myqcloud.com`，**不要用** `custom_domain`（CDN 域名）。
 - **签名 header 列表**：必须同时包含 `host` **和 `content-length`**（`q-header-list=host;content-length`）。只签 `host` 会被 COS 拒。
-- 本技能 `scripts/ima/cos-upload.cjs` 已按上述实现，**直接用它**传字节，不要自己重写上传器。
+- 本技能 `scripts/ima_cos_upload.js` 已按上述实现，**直接用它**传字节，不要自己重写上传器。
 - `start_time`/`expired_time` 必须原样透传 `create_media` 返回值，不要重新计算。
 
 ## 上传失败兜底（硬性）
@@ -93,6 +103,37 @@ pdf→application/pdf；doc→application/msword；docx→application/vnd.openxm
 - 原因：那次 `create_media` 返回的临时凭证（`secret_id`/`secret_key`/`token`）**本身无效**，不是签名域漏签。
 - 修复（不要复用旧 media_id）：
   1. **仅对该文件重新 `create_media`** 拿一份新凭证（会得到**新 media_id**）。
-  2. 用新凭证重跑 `cos-upload.cjs` → 应返回 `HTTP 200`。
+  2. 用新凭证重跑 `ima_cos_upload.js` → 应返回 `HTTP 200`。
   3. `add_knowledge` 用**新 media_id** 提交。
 - 经验：长 token 一律经 Node 脚本（`subprocess` 列表传参）下发，绝不手写命令行，避免漏字符。
+
+## 端到端上传流程（实测可用，2026-08-29 跑通《不测的秘密》14 文件）
+
+1. **为每个文件 `create_media`**（凭证**逐文件独立签发**，secret_id 都不相同，不能复用）→ 收集每文件的 `media_id` + `cos_credential` + 本地 `file_path`，写成 creds JSON（见下）。
+2. **COS 直传**：`NODE_PATH=<node 工作区>/node_modules node scripts/ima_cos_upload.js <creds.json>`（SDK：`cos-nodejs-sdk-v5`，需先在托管 node 工作区 `npm install`）。逐文件报告 `OK <file> media_id=...` / `FAIL <file> <COS Message>`。
+3. **`add_knowledge`**：对每个成功上传的 `media_id` 调一次，归到目标 `folder_id`。
+
+### creds JSON 结构示例（传给 ima_cos_upload.js）
+```json
+{
+  "items": [
+    {
+      "media_id": "soundrecording_9cb4..._4f61156ae355...",
+      "file_name": "ep01_前言+第1-2章_测试危机与精准测试理念.mp3",
+      "file_path": "/abs/path/output/ep01_.....mp3",
+      "content_type": "audio/mpeg",
+      "cos_credential": {
+        "secret_id": "AKID...", "secret_key": "...", "token": ".....",
+        "bucket_name": "ima-share-kb-1258344701", "region": "ap-shanghai",
+        "cos_key": "data/.../xxx.mp3", "start_time": 1756..., "expired_time": 1756...
+      }
+    }
+  ]
+}
+```
+
+### 实测坑（已记入 SKILL.md）
+- **凭证每文件独立**：13 个文件要 13 次 `create_media`，想"复用一份凭证只换 media_id"行不通（secret_id 不同）。
+- **首轮 3 个文件因超长 token/secret 手录错位**报 `Access Denied` / `InvalidAccessKeyId` → 重新 `create_media` 拉新凭证重传即通过（旧 media_id/cos_key 作废）。
+- **STS 凭证 12 小时有效**，整批上传务必在有效期内完成。
+- 上传后 `get_knowledge_list` 二次核验 `total_size`，确认落位（不要只信 add_knowledge 返回 success）。

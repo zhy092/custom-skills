@@ -17,7 +17,7 @@ agent_created: true
 
 1. **拆解 + 合成**：解析 → 切块 → 精读 → 分集 → 写对话脚本 → 语音合成 → 拼接 → 生成 RSS。
 2. **总控编排**：`scripts/pipeline.py` 把确定性本地步骤（抽取/切块/合成/重命名/RSS）一键串起来。
-3. **ima 入库**：把成品音频**和书籍源文件**按章节顺序上传到 ima 知识库指定文件夹（自带零依赖 `cos-upload.cjs` + MCP 工具流程）。
+3. **ima 入库**：把成品音频**和书籍源文件**按章节顺序上传到 ima 知识库指定文件夹（自带零依赖 `ima_cos_upload.js` + MCP 工具流程）。
 
 **分工原则**：脚本负责确定性 I/O（解析、切块、语音合成、音频拼接、上传），
 模型负责智力工作（知识提炼、分集编排、口语化脚本写作）。不要试图让脚本"理解"书，
@@ -80,7 +80,7 @@ agent_created: true
 | 5 | **丢掉命名规范** | 产出 `ep01.mp3` 而非 `ep01_第1-2章_主题.mp3` | 严格套用 `rename_by_chapter.py` |
 | 6 | **忘生成 RSS / shownotes** | 只有 mp3，没有 `podcast.xml` 和 `.md` 文稿 | `make_feed.py` + `shownotes_template.md` |
 | 7 | **试图 API 建 ima 文件夹** | 接口不存在 / 404 | 让用户手动建，你只负责按 folder_id 上传 |
-| 8 | **ima 上传 COS 签名错** | 403 `InvalidAccessKeyId`，误判"连接器坏了"反复换方式 | 直连 COS 域名 + 签 `host;content-length`（`cos-upload.cjs` 已对，直接用） |
+| 8 | **ima 上传 COS 签名错** | 403 `InvalidAccessKeyId`，误判"连接器坏了"反复换方式 | 直连 COS 域名 + 签 `host;content-length`（`ima_cos_upload.js` 已对，直接用） |
 | 9 | **大文件超 STS 上限** | 191MB 被 `AccessDenied`；反复重试浪费时间 | 单文件 <100MB 才自动传；超限按兜底告知用户手动上传 |
 
 ### 写脚本与跑流程时还会踩的隐性坑（基于代码实测）
@@ -120,12 +120,91 @@ agent_created: true
 3. 用**外层重试循环**包住整条管线（每集最多 8 轮、每轮 `--retries 10 --concurrency 2`），跑完所有集再统一 `merge → rename → make_feed`。
 这样单次抖动不会中断全流程，也不浪费已渲染的片段。
 
+**补充：比 400 更隐蔽的「并发挂起」（2026-08 实测，比 400 更容易浪费大量时间）**
+
+上面说的是「报错型」失败。**更要命的是「静默挂起型」**：`--concurrency` 调高（如 4）时，
+edge-tts 偶发请求**无限挂起 —— 不报错、不超时、不退出**，进程原地卡死数小时。
+
+🐛 真实事故：一次渲染中 ep03 卡在某句 15 分钟无任何新片段产出（对照 `ls -lt` 的文件
+修改时间才发现）。更坑的是：**删掉 0 字节文件后整集重跑，往往再次卡在同一句**，
+于是上面「删 0 字节 → 重渲」的常规救法在这里失灵，白白耗掉 20+ 分钟。
+
+**症状自查**：某集 `seg_*.mp3` 数量长时间不增长，且 `ls -lt <ep 目录>` 最后修改时间
+停在很久以前 → 基本可判定挂起，**不要继续干等**，立刻介入。
+
+**正确的三层防御（按优先级）**：
+
+| 层 | 做法 | 目的 |
+|---|---|---|
+| 预防 | 批量渲染用 `scripts/render_batch.py`（逐集 `subprocess` 超时，默认 900s），别用裸 for 循环 | 卡死只损失一集，不拖垮整批 |
+| 降频 | 挂起后改用 `--concurrency 1~2` 而非 4 | 高并发是挂起诱因 |
+| 救法 | `python scripts/fix_segments_solo.py <工作目录> [轮数]` | 把每个 0 字节句抽成最小脚本单句重渲，2–3 秒/句，稳定 |
+
+`fix_segments_solo.py` 原理：单独构造只含**一句**的极小脚本，`--concurrency 1` 渲染，
+再把产物按原 `seg_XXXX.mp3` 编号复制回去。它复用原脚本的 voices/engine 配置，
+产物与批量渲染结果一致，可安全拼接。集号支持 `03` 与 `ep03` 两种写法。
+
+**配套坑：进程被中断后 manifest 丢失**
+渲染进程被 kill/超时后，片段已落盘但 `render_manifest.json` 没写成，此时 `merge_audio.py`
+报 `FileNotFoundError: render_manifest.json`。**不要整集重渲**（可能再次挂起），改用：
+
+```bash
+python scripts/rebuild_manifest.py <工作目录> 03     # 从已存在的片段反向补 manifest
+```
+
+它复用 `tts_render.py` 的 `resolve_voice` 与文本清洗逻辑，保证 hash/voice 与原始渲染一致；
+若仍有缺失或 0 字节片段会主动中止并提示，不会产出坏 manifest。
+
+**macOS 无 `timeout` 命令**：想给命令加超时别写 `timeout 180 ...`（会 `command not found`）。
+要么 `brew install coreutils` 后用 `gtimeout`，要么直接用上述 Python 脚本
+（内部已用 `subprocess.run(..., timeout=)`）。
+
+**另一个隐蔽坑：同时跑多个渲染进程会被系统 kill（exit 137）**
+后台批量渲染 + 前台补渲同时进行时，进程可能被 OOM/资源管控直接杀掉（退出码 137）。
+**渲染阶段尽量串行**，不要一边后台批量渲一边前台补渲同一批集。
+
+### 写脚本 JSON 的高频手误：`speaker` 后误写冒号
+
+写 `epNN.script.json` 时极易写成
+`{"speaker": "host": "text": "..."}`（第二个分隔符写成 `:` 而非 `,`），
+`tts_render.py` 只会抛一长串 `JSONDecodeError` 栈，不直接指到问题行。
+**低成本防护**：写完所有脚本后先跑一次校验，别等渲染时才炸：
+
+```bash
+python - <<'EOF'
+import glob, json, re
+pat = re.compile(r'("speaker"\s*:\s*"[^"]+")\s*:\s*("text"\s*:)')
+for p in sorted(glob.glob('scripts/ep*.script.json')):
+    s = open(p, encoding='utf-8').read()
+    new = pat.sub(r'\1, \2', s)
+    if new != s:
+        open(p, 'w', encoding='utf-8').write(new); print('fixed', p)
+    d = json.load(open(p, encoding='utf-8'))
+    print(f"valid {p} | {len(d['lines'])} 句 | {sum(len(l['text']) for l in d['lines'])} 字符")
+EOF
+```
+
+**顺带卡字数**：中文 250–280 字/分，目标 18–22 分钟 ⇒ **每集需 4500–5500 字符**。
+初稿常只写到 1500–1800 字符（约 7–8 分钟），明显偏短，渲染前务必先核对上面这行输出。
+
+### 章节识别失效不等于报废（PDF 目录页码错位时）
+
+部分 PDF（尤其华章/机械工业出版社电子书）的目录文本会被抽成 `第章`（数字被拆散），
+导致 `structure.json` 只识别出「前言 / 后记」两章，正文全被塞进「后记」。
+**不要因此重做抽取**——`chunk_book.py` 的切块仍然可用，正文内容完整。
+
+正确做法：**从 `book.txt` 开头的目录文本人工还原真实章节表**，再在 `episodes.json`
+的 `chapter_range` 字段里写回真实章节（如 `第3章`、`第6-9章`），命名规范照样成立。
+可用 `grep -n "^第[0-9]*章\|^前言\|^引子\|^后记\|^附录" book.txt` 定位章节起始行辅助还原。
+
 **G. ima 上传（COS 直传）专属坑 —— 必须按正确方式签，且注意文件大小上限**
 
 ima 连接器**没有"直接上传文件"的工具**。上传 = `create_media`（拿 COS 临时凭证）→ 客户端自签 PUT 到 COS → `add_knowledge`（归库）。自签 PUT 有两条致命细节，错一个就 403：
 
+> **当前上传器：`scripts/ima_cos_upload.js`（Node + 官方 `cos-nodejs-sdk-v5`，已替代旧的 `ima_cos_upload.js`）**。首次使用前安装 SDK：`mkdir -p /Users/zhy/.workbuddy/binaries/node/workspace && <托管node>/npm install cos-nodejs-sdk-v5`。脚本已内置路径解析，自动用官方 SDK 签名（`host`+`content-length` 由 SDK 处理），无需手签；直接 `node ima_cos_upload.js <creds.json>` 即可，不要自己实现上传。
+
 1. **必须用直连 COS 域名，且签名要包含 `content-length`**：
-   - ✅ 正确：上传主机 = `https://{bucket}.cos.{region}.myqcloud.com`，签名 header 列表 = `host` **+ `content-length`**（本技能自带 `cos-upload.cjs` 就是这么签的，直接用它，不要自己实现）。
+   - ✅ 正确：上传主机 = `https://{bucket}.cos.{region}.myqcloud.com`，签名 header 列表 = `host` **+ `content-length`**（`ima_cos_upload.js` 用官方 SDK 就是这么签的，直接用它，不要自己实现）。
    - ❌ 错误：`custom_domain`（CDN 域名）、或只签 `host` → COS 回 `403 InvalidAccessKeyId`（**不是密钥失效，是签名不匹配**）。
    - 🐛 真实坑：曾用 `custom_domain` + 只签 `host` 上传，连续 6 轮都 403，一度误判"连接器坏了"；改成直连域名 + 签 `content-length` 后立刻 200。
 2. **STS 临时凭证有单次上传大小上限（约 100MB）**：
@@ -316,21 +395,39 @@ $PY $S/make_feed.py --dir <工作目录>/output \
    - `create_media`：`file_name` 用**原文件名**（如 `世界上最简单的会计书(高清).pdf`）、
      `content_type` 按扩展名查 `references/ima_api.md` 的 MIME 表（pdf→`application/pdf`）、
      `file_size` **必须与磁盘字节数完全一致**，否则服务端拒收。
-   - `cos-upload.cjs` 传字节（⚠️ **必须传 `--start-time`/`--expired-time`**，取自 `create_media` 返回的 `start_time`/`expired_time`；否则本机时钟若慢于真实时间，签名会落在 STS 生效窗口外，报 `InvalidAccessKeyId`）→ `add_knowledge(folder_id)`。
-   - 🐛 **真实坑**：扫描版 / 高清 PDF 源文件常达 100–200MB，`cos-upload.cjs` 默认 socket 超时 5 分钟，
+   - `ima_cos_upload.js` 传字节（⚠️ **必须传 `--start-time`/`--expired-time`**，取自 `create_media` 返回的 `start_time`/`expired_time`；否则本机时钟若慢于真实时间，签名会落在 STS 生效窗口外，报 `InvalidAccessKeyId`）→ `add_knowledge(folder_id)`。
+   - 🐛 **真实坑**：扫描版 / 高清 PDF 源文件常达 100–200MB，`ima_cos_upload.js` 默认 socket 超时 5 分钟，
      大文件务必加 `--timeout 540000`；调用它的 Bash 命令也要设较长超时（如 600000ms），否则传到一半被切断。
    - ⚠️ 上传不可逆，源文件名确认无误再传（建议保持原文件名，ima 以 file_name 作标题）。
 5. 每文件（音频 + 源文件）三步：
-   `create_media`（拿 COS 临时凭证）→ `cos-upload.cjs` 传字节 → `add_knowledge(folder_id)`。
+   `create_media`（拿 COS 临时凭证）→ `ima_cos_upload.js` 传字节 → `add_knowledge(folder_id)`。
 6. 回查 `mcp__ima-mcp__get_knowledge_list(folder_id=...)` 校验落位（音频 + 源文件都应出现）。
 
 **⚠️ 上传失败兜底（硬性规则）**
-- 若 `create_media` + `cos-upload.cjs` 上传报错，典型错误码与含义：
+- 若 `create_media` + `ima_cos_upload.js` 上传报错，典型错误码与含义：
   - `AccessDenied` → **文件超过 STS 凭证单次上传上限（约 100MB）**；
-  - `InvalidAccessKeyId` → STS **时间窗口错**（最常见）：本机时钟慢于真实时间时 `cos-upload.cjs` 默认 `Date.now()` 签名落在凭证 `start_time` 生效窗口外，腾讯云判定临时 AKID 无效；**必须用 `create_media` 返回的 `start_time`/`expired_time` 作 `--start-time`/`--expired-time` 签名**；另临时 `secret_id` 漏字符也会触发，须整段完整复制。
+  - `InvalidAccessKeyId` → STS **时间窗口错**（最常见）：本机时钟慢于真实时间时 `ima_cos_upload.js` 默认 `Date.now()` 签名落在凭证 `start_time` 生效窗口外，腾讯云判定临时 AKID 无效；**必须用 `create_media` 返回的 `start_time`/`expired_time` 作 `--start-time`/`--expired-time` 签名**；另临时 `secret_id` 漏字符也会触发，须整段完整复制。
   - `403` 超时 → Bash 调用超时太短（大文件须 `--timeout 540000` + Bash ≥600000ms）。
 - **处理流程（硬性）**：① 先读 COS 返回的错误码判定原因，**不要盲目重试**；② 超限或签名域错 → **停止自动重试**；③ **明确告知用户**：哪本书、哪个文件、失败原因（如"源 PDF 191MB 超过 ima 单次上传上限约 100MB"）、建议操作（"请在 ima 客户端手动把该文件拖入『书籍播客 / 书名』文件夹"）；④ 已成功入库的文件照常保留，不回滚，其余小文件继续传。
 - ❌ **禁止**：超限文件反复重试、自己改写签名算法"碰运气"、不告知用户就跳过。
+
+**⚠️ 前置判定：连接器是否已连接（开工阶段 8 前必查）**
+
+本会话的 `<connector-status>` 会列出每个连接器的状态。若看到
+`ima-mcp ima知识库: disconnected`，说明**阶段 8 此刻无法自动完成**，不要硬闯。
+
+确认方法：`ToolSearch` 用 `tool_names: ["mcp__ima-mcp__get_knowledge_list", ...]` 精确查找。
+⚠️ **判定陷阱**：ToolSearch 在找不到目标时会返回**一批不相关的工具**（如 github 的工具），
+看起来像"找到了 2 个"，其实**一个 ima 工具都没有**。所以必须**逐个核对返回工具名是否以
+`mcp__ima-mcp__` 开头**，不能以"Found N tool(s)"的数量判断。
+
+确认未连接后的处理（硬性）：
+1. **先把阶段 1–7 完整交付**（本地 mp3 + shownotes + podcast.xml + index.md），不要卡在上传上。
+2. 顺手生成 `upload_manifest.json`（记录每个待传文件的 `file_name` / `file_size` /
+   `content_type` / `file_ext`，并核对总计是否超过 100MB 阈值），为后续上传做准备。
+3. **明确告知用户**：ima 连接器当前未连接 → 请在连接器管理页连接后让我继续上传；
+   或给出手动上传路径（ima 客户端 → 「书籍播客」→ 书名文件夹 → 拖入文件）。
+4. ❌ 不要假装上传成功；❌ 不要因为上传失败就不交付本地产物。
 
 详细字段 / 凭证映射 / MIME 对照 / 限制见 `references/ima_api.md`。**注意：ima 上传不可逆
 （不能移动/删除/重命名），确认无误再传。**
@@ -416,7 +513,7 @@ $PY $S/tts_render.py --script ep01.script.json --out-dir out --force
 | 渲染中断 | 直接重跑同一条命令，已完成片段自动复用 |
 | edge-tts 偶发 `400 invalid parameter` | 免费端点网络抖动（约每 80 句 1 句，非内容问题），`pipeline.py render` 默认 3 次重试后整体 `sys.exit`，会中断后续集渲染、未完成集不合并；救法：删掉 0 字节段 → 断点续渲（`tts_render` 以 `size>0` 判缓存，已正常的句跳过）→ 外层重试循环包住整条管线（如每集最多 8 轮、每轮 `--retries 10`），跑完所有集再统一合并+重命名+RSS |
 | ima `add_knowledge` 报「文件夹不存在」 | `folder_id` 手误/写错（如 `999974`↔`0399974`）→ 该集未入库；核对 `folder_id` 后用正确值重提 `add_knowledge` 即可，无需重传字节 |
-| COS 上传 403 `InvalidAccessKeyId` | **STS 临时凭证签名时间窗口错（最常见根因）**：`cos-upload.cjs` 默认用本机 `Date.now()` 做签名窗口，若**本机系统时钟慢于真实时间**（哪怕慢几分钟），签名时间会落在 `create_media` 返回的 `start_time` 生效窗口之外，腾讯云直接判定该临时 AKID 无效。救法：把 `create_media` 返回的 `start_time`/`expired_time` 作为 `--start-time`/`--expired-time` 传给 `cos-upload.cjs` 再签名（绝不用默认 Date.now）；若仍偶发 403，sleep 15s 重试（ima↔腾讯云 凭证传播有秒级延迟）。另：`create_media` 返回的 `secret_id` 是临时 AKID，**必须整段完整复制**，漏一位字符同样报 InvalidAccessKeyId |
+| COS 上传 403 `InvalidAccessKeyId` | **STS 临时凭证签名时间窗口错（最常见根因）**：`ima_cos_upload.js` 默认用本机 `Date.now()` 做签名窗口，若**本机系统时钟慢于真实时间**（哪怕慢几分钟），签名时间会落在 `create_media` 返回的 `start_time` 生效窗口之外，腾讯云直接判定该临时 AKID 无效。救法：把 `create_media` 返回的 `start_time`/`expired_time` 作为 `--start-time`/`--expired-time` 传给 `ima_cos_upload.js` 再签名（绝不用默认 Date.now）；若仍偶发 403，sleep 15s 重试（ima↔腾讯云 凭证传播有秒级延迟）。另：`create_media` 返回的 `secret_id` 是临时 AKID，**必须整段完整复制**，漏一位字符同样报 InvalidAccessKeyId |
 | COS 上传 `AccessDenied` | **文件超 STS 凭证单次上限（约 100MB）**：39MB 成功、191MB 被拒；超限请告知用户手动上传，不要重试 |
 | COS 上传 403 超时 | Bash 调用超时太短；大文件加 `--timeout 540000` 且 Bash 设 ≥600000ms |
 | ima 找不到文件夹 | 回到阶段 8 步骤 2，提示用户在 ima 客户端新建 |
