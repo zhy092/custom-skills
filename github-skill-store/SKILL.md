@@ -1,7 +1,7 @@
 ---
 name: github-skill-store
 description: 把 WorkBuddy 技能（目录）存入用户的 GitHub 仓库 zhy092/custom-skills。当用户说"把技能存到 GitHub""新增技能到我的仓库""push 技能到 github""归档这个技能"时使用。技能本身可由本机 ~/.workbuddy/skills/<name>/ 提供，也可从其他路径传入。
-version: 1.2.0
+version: 1.3.0
 author: zhy
 tags: [github, skill-distribution, version-control]
 category: devops
@@ -54,7 +54,9 @@ license: MIT
 | 8 | **忘记推 GitHub** | 本地更新了但 GitHub 仓库还是旧的 | 用户认可沉淀后，必须走一遍本技能的 push 流程 |
 | 9 | **仓库 `.gitignore` 缺失或不全** | venv/pyc/.DS_Store 被提交上去 | 首次建仓时补 `.gitignore`（见下方模板） |
 | 10 | **commit 时没设 user.name/email** | git 报 `Please tell me who you are` | 用 `-c user.name=` `-c user.email=` 内联指定，不改全局配置 |
-| 11 | **README 索引追加到文件末尾** | 新技能条目出现在“已收录技能”列表之外，GitHub 上看不到 | 用脚本插入到 `## 已收录技能` 标题下，格式为 `### [name](./name/)` |
+| 11 | **README 索引追加到文件末尾** | 新技能条目出现在"已收录技能"列表之外，GitHub 上看不到 | 用脚本插入到 `## 已收录技能` 标题下，格式为 `### [name](./name/)` |
+| 12 | **GitHub MCP 连接器写操作被 403 挡** | `push_files` / `create_repository` / `update_file` 报 `403 Resource not accessible by integration` | GitHub MCP 是**只读**集成 App，所有写操作都走不通；改用本技能 `curl`（建仓）+ `git`（clone/push）通道，token 从钥匙串 `security` 取 |
+| 13 | **本机代理对 github.com git 端点不稳定** | `git clone`/`push` 偶发 `502`（CONNECT 隧道失败），但 `api.github.com` 正常 | 直接重试 git 命令即可（git 会重连）；持续失败用 `GIT_CURL_VERBOSE=1` 看代理日志，或临时 `git -c http.proxy=""` 绕开 |
 
 ### 输出规范
 
@@ -124,7 +126,7 @@ if [ "$HTTP_CODE" = "404" ]; then
 fi
 ```
 
-> **坑**：如果 MCP 连接器有 `create_repository` 工具且权限够，也可以用它；但已知 GitHub MCP 连接器报 403，所以用 `curl` 更可靠。
+> **坑（重要）**：GitHub MCP 连接器是**只读**集成 App，任何写操作（`create_repository` / `push_files` / `update_file` / `create_or_update_file` 等）都会返回 `403 Resource not accessible by integration`，**绝不可依赖它来建仓或推送**。本技能一律走 `curl`（建仓）+ `git clone/push`（推送）通道，token 从 macOS 钥匙串 `security` 取，绝不打印。经验：2026-08-29 推 `ima-cos-upload` / `book-to-podcast` 更新时，MCP `push_files` 直接 403，改 git 通道一次成功。
 
 ### 2. 克隆到临时目录
 
