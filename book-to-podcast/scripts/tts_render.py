@@ -360,6 +360,26 @@ def main() -> None:
     done_n = [0]
 
     def work(t: dict) -> dict:
+        # 文件级断点续渲：即使 manifest 缺失，只要已存在非空音频就直接复用
+        stem = t["stem"]
+        existing_file = None
+        for cand_ext in (".mp3", ".wav", ".ogg", ".m4a"):
+            p = stem.with_suffix(cand_ext)
+            if p.exists() and p.stat().st_size > 0:
+                existing_file = p
+                break
+        if existing_file is None:
+            for p in stem.parent.glob(stem.name + ".*"):
+                if p.exists() and p.stat().st_size > 0:
+                    existing_file = p
+                    break
+        if existing_file is not None:
+            done_n[0] += 1
+            return {"index": t["index"], "speaker": t["speaker"], "voice": t["voice"],
+                    "text": t["text"], "chars": t["chars"], "hash": t.get("hash", ""),
+                    "file": str(existing_file), "pause_after": t.get("pause_after", 0),
+                    "chapter": t.get("chapter"), "cached": True}
+
         prev = cache.get(t["index"])
         if prev and prev.get("hash") == t["hash"]:
             f = Path(prev["file"])

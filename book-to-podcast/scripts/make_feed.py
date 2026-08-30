@@ -28,14 +28,22 @@ FFPROBE = shutil.which("ffprobe")
 
 
 def duration_of(path: Path) -> str:
-    if not FFPROBE:
-        return ""
+    if FFPROBE:
+        try:
+            r = subprocess.run(
+                [FFPROBE, "-v", "error", "-show_entries", "format=duration",
+                 "-of", "default=nw=1:nk=1", str(path)],
+                capture_output=True, text=True, check=True)
+            total = int(float(r.stdout.strip()))
+            h, rem = divmod(total, 3600)
+            m, s = divmod(rem, 60)
+            return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"
+        except Exception:
+            pass
+    # 兜底：用 mutagen 读取时长（无需 ffprobe）
     try:
-        r = subprocess.run(
-            [FFPROBE, "-v", "error", "-show_entries", "format=duration",
-             "-of", "default=nw=1:nk=1", str(path)],
-            capture_output=True, text=True, check=True)
-        total = int(float(r.stdout.strip()))
+        from mutagen.mp3 import MP3
+        total = int(MP3(str(path)).info.length)
         h, rem = divmod(total, 3600)
         m, s = divmod(rem, 60)
         return f"{h}:{m:02d}:{s:02d}" if h else f"{m}:{s:02d}"

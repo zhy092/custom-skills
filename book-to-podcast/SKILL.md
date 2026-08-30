@@ -199,6 +199,11 @@ EOF
 
 **G. ima 上传（COS 直传）专属坑 —— 必须按正确方式签，且注意文件大小上限**
 
+> **上传方式优先级（重要）**：
+> 1. 若 ima-mcp 已上线**原生"直接吃文件内容"的上传工具**（如 `upload_media`/`write_media`/`put_media`），**直接用原生工具**，本技能不再走 COS 直传。
+> 2. 否则**优先复用独立技能 `ima-cos-upload`**（`~/.workbuddy/skills/ima-cos-upload/`）——它每次调用会先探测原生工具，发现即**自我淘汰**并回写本文件，无需手动维护。
+> 3. 若 `ima-cos-upload` 不可用，回退到本技能自带 `scripts/ima_cos_upload.js`（下方）。
+
 ima 连接器**没有"直接上传文件"的工具**。上传 = `create_media`（拿 COS 临时凭证）→ 客户端自签 PUT 到 COS → `add_knowledge`（归库）。自签 PUT 有两条致命细节，错一个就 403：
 
 > **当前上传器：`scripts/ima_cos_upload.js`（Node + 官方 `cos-nodejs-sdk-v5`，已替代旧的 `ima_cos_upload.js`）**。首次使用前安装 SDK：`mkdir -p /Users/zhy/.workbuddy/binaries/node/workspace && <托管node>/npm install cos-nodejs-sdk-v5`。脚本已内置路径解析，自动用官方 SDK 签名（`host`+`content-length` 由 SDK 处理），无需手签；直接 `node ima_cos_upload.js <creds.json>` 即可，不要自己实现上传。

@@ -27,6 +27,12 @@ WorkBuddy 自定义技能仓库 —— 存放我自己创建 / 改造的技能�
 - 安全原则：仅删除 expired artifact 和 caches；active artifact 需用户确认；正在写入的 artifact 跳过。
 - 延迟提醒：删除后 GitHub Billing 仪表盘可能有 5–30 分钟延迟，不代表删除失败。
 
+### [ima-cos-upload](./ima-cos-upload/)
+ima 知识库 COS 直传（带自我淘汰）技能：把本地文件（音频 / 文稿 / PDF / 图片 …）存入 ima，且每次调用先探测 ima 是否已上线原生上传工具——一旦上线，自动改用原生工具、回写 book-to-podcast 并把本技能标记弃用。
+
+- 适用场景：任何流程要存文件进 ima，且 ima-mcp 已连接、但缺少"直接吃文件内容"的上传工具时调用。
+- 设计：带"自我淘汰"开关——ima 哪天出了原生上传工具，这个技能就自动让位，不占主线。
+
 ## 目录约定
 ```
 custom-skills/
