@@ -6,6 +6,48 @@ WorkBuddy 自定义技能仓库 —— 存放我自己创建 / 改造的技能�
 
 ## 已收录技能
 
+### [comic-text-overlay](./comic-text-overlay/)
+给漫画图片添加中文字幕文字，合成图文并茂的绘本长图。
+
+- 适用场景：给漫画 / 绘本配故事文字、给图片加字幕、制作儿童故事漫画。
+- 工作流：分析图片结构 → 准备故事文字 → 合成脚本输出长图。
+
+### [daily-coldfacts](./daily-coldfacts/)
+「每日一个为什么」冷知识自动化：选题 → 生成问答 → 出海报，按历史记录自动去重。
+
+- 适用场景：每日冷知识内容的自动化生产。
+- 关键特性：内置历史记录去重，避免重复选题。
+
+### [flowcap-playwright-verify](./flowcap-playwright-verify/)
+FlowCap 纯静态前端的无头 Playwright 自测与全量回归标准工作流。
+
+- 适用场景：FlowCap 前端改完后跑浏览器验收 / 回归。
+- 关键特性：受管 Node 路径、路由守卫绕过、改完外壳**先语法检查**再跑，附常见坑清单。
+
+### [ima-api-key-manager](./ima-api-key-manager/)
+IMA Skills API Key 生命周期管理：识别过期 → 通知用户 → 接收新 Key → 更新全部配置 → 验证 → 记录。
+
+- 适用场景：IMA 调用报错码 `20004`、鉴权失败、用户主动告知 Key 过期。
+- 关键特性：一次处理覆盖 `ima-skill` / `腾讯ima:notes` / `腾讯ima:knowledge-base` 等所有依赖方。
+
+### [sandbox-cli-install-recovery](./sandbox-cli-install-recovery/)
+WorkBuddy 沙箱内 CLI 安装 / 更新失败的「症状 → 根因 → 解法」速查。
+
+- 适用场景：装 CLI 报 `native binary not installed` / `postinstall script was not run` / `Missing optional dependency`，或 npm install 卡死。
+- 关键特性：沙箱三个注入点如何干预子进程的机制说明 + 绕过手法（含 safe-delete 拦截时用 `mv` 代替 `rm`）。
+
+### [virtual-scroll-doc-extract](./virtual-scroll-doc-extract/)
+从虚拟滚动渲染的在线富文档（钉钉 / 飞书 / 语雀 / 腾讯文档）完整提取内容，专治「以图片承载、DOM 里没有文字」的章节。
+
+- 适用场景：`read_text` 只拿到部分正文、某章节抓下来是空的、抓取长度与文档字数统计差距大。
+- 关键特性：前台渲染依赖、虚拟列表判据、滚动收集法、图片批量下载、图文双载体核对法。
+
+### [wechat-miniprogram-from-ui](./wechat-miniprogram-from-ui/)
+把 UI 设计稿（Ardot / PNG 截图）转成完整可运行的微信小程序工程。
+
+- 适用场景：拿到设计稿要快速起一个小程序项目骨架。
+- 关键特性：原生 WXML / WXSS / JS，含页面、组件、Mock 数据、测试用例与部署指引。
+
 ### [book-to-podcast](./book-to-podcast/)
 一体化「拆书播客」技能：把任意格式的书籍（PDF / EPUB / MOBI / TXT / DOCX / HTML …）拆解成结构化知识要点，并自动生成多集**双人对话播客音频（MP3）**、逐集文稿与 RSS 订阅源，还能一键存入 ima 知识库「书籍播客」按书名归档。
 
