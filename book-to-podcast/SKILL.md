@@ -1,7 +1,7 @@
 ---
 name: book-to-podcast
 description: 一体化技能：把任意格式书籍（PDF/EPUB/MOBI/TXT/DOCX/HTML…）拆解成结构化知识要点，并自动生成多集双人对话播客音频（MP3）、文稿与 RSS 订阅源，还可一键存入 ima 知识库「书籍播客」按书名归档。当用户说"拆书""解读这本书""把这本书做成播客/音频/有声节目""生成读书笔记音频""book to podcast""听书稿"，或提供书籍文件希望转成可收听内容，或想把生成的播客音频"上传到 ima 知识库/存进 ima"时，应使用本技能。支持 edge-tts（免费）、阿里云百炼 Qwen-TTS、火山引擎豆包、MiniMax、OpenAI 等多种语音引擎。
-version: 1.0.0
+version: 1.1.0
 author: zhy
 tags: [拆书, 播客, 音频, 知识库, ima, book-to-podcast, RSS]
 category: media
@@ -77,7 +77,7 @@ agent_created: true
 | 2 | **坏文字层 PDF 死磕 OCR** | tesseract 编译卡死 / 抽出乱码 / 反复重试 | 直接走视觉子代理读图分支 |
 | 3 | **ffmpeg 装错位置** | `ffmpeg: command not found`，音频无停顿 | 用 venv 内的 `imageio-ffmpeg`，不装系统版 |
 | 4 | **TTS 引擎选了付费但没 Key** | 401/403，反复查配置 | 默认 edge-tts，除非用户明确给 Key |
-| 5 | **丢掉命名规范** | 产出 `ep01.mp3` 而非 `ep01_第1-2章_主题.mp3` | 严格套用 `rename_by_chapter.py` |
+| 5 | **丢掉命名规范** | 产出 `ep01.mp3` 而非 `ep01_第1-2章_主题.mp3` | 严格套用 `rename_by_chapter.py`；小说类直接用 `merge_and_name.py` 一步命名 |
 | 6 | **忘生成 RSS / shownotes** | 只有 mp3，没有 `podcast.xml` 和 `.md` 文稿 | `make_feed.py` + `shownotes_template.md` |
 | 7 | **试图 API 建 ima 文件夹** | 接口不存在 / 404 | 让用户手动建，你只负责按 folder_id 上传 |
 | 8 | **ima 上传 COS 签名错** | 403 `InvalidAccessKeyId`，误判"连接器坏了"反复换方式 | 直连 COS 域名 + 签 `host;content-length`（`ima_cos_upload.js` 已对，直接用） |
@@ -311,6 +311,29 @@ $PY $S/chunk_book.py --work <工作目录> --target-chars 12000
 
 产出 `chunks/chunk_XXX.md` 与 `chunks/manifest.json`。
 
+**小说 / 三部曲 / 长篇故事书走另一条路：`chunk_novel.py`**（不要用上面那个）
+
+```bash
+# 三部曲：按册分配集数（章节号从 N 回到 1 → 判定新一册，自动识别）
+$PY $S/chunk_novel.py --input <工作目录>/book.txt --out <工作目录>/chunks \
+    --episodes 4,3,3 --labels "第一部,第二部,第三部"
+
+# 册名靠标题页切（如三部曲各有「三体2」「三体3」标题页）
+$PY $S/chunk_novel.py --input book.txt --out chunks --episodes 3,4,4 \
+    --vol-detect "markers:三体2,三体3" --labels "三体1,三体2,三体3"
+
+# 不分册，整本均分 6 集
+$PY $S/chunk_novel.py --input book.txt --out chunks --episodes 6 --vol-detect none
+
+# 开头有双栏乱序前言（微信读书逐屏抓取常见）→ 从正文标记起算
+$PY $S/chunk_novel.py ... --skip-to-re $'\n1\n科学边界'
+```
+
+差别一句话：`chunk_book.py` 切 1.2 万字小块**给 agent 精读汇总知识图谱**（非虚构书）；
+`chunk_novel.py` 切 7–9 万字大块**一块直接写一集**（小说要连续读，不做摘要、不加 overlap）。
+它已经处理了两个实测坑：阅读器抓取里的**假章号**（「第一回出远门」被当成章号 → 已过滤，
+且「新册」必须后面紧跟第 2 章才认）、以及**双栏乱序前言**（用 `--skip-to-re` 跳过）。
+
 ### 阶段 3 · 逐块精读 ⭐ 决定成片质量
 
 先读 `references/extraction_playbook.md`。
@@ -327,6 +350,13 @@ $PY $S/chunk_book.py --work <工作目录> --target-chars 12000
 
 核心原则：**按主题线分集，不按章节顺序分集**；一集一个核心问题；一集 3–5 个知识点。
 详见 playbook 第三节。
+
+**小说分支（重要区别）**：小说不能按主题线重组——重排会毁掉叙事。此时：
+- 集数按篇幅定（素材块 7–9 万字 ≈ 一集；80 万字 ≈ 10 集），册内均分，用 `chunk_novel.py` 一次切好；
+- **一块 = 一集**，把该块整段交给子代理，让它自己找本集的切入场景与主题，不要跨块拼主题；
+- 提示词里务必写「**严格以素材内容为准，不要凭记忆预设情节**」——实测子代理能纠正主代理记错的情节
+  （例如「砖窑倒塌」其实在第三部，不在第二部），这句话能挡掉一整类胡编；
+- 素材来自逐屏抓取时，补一句「每行约 20 字有硬换行、句子被切断，按语义连起来读」。
 
 `episodes.json` 每集**必须包含**（重命名阶段会用到）：
 
@@ -358,6 +388,12 @@ $PY $S/merge_audio.py --manifest <工作目录>/audio/ep01/render_manifest.json 
 # 阶段 6.5 · 按章节重命名（默认规则，自动套用）
 # 把 output/epNN.mp3 与同名 .md 重命名为 ep{NN}_{章节范围}_{主题}.mp3/.md
 $PY $S/rename_by_chapter.py <工作目录>
+
+# 【推荐】合并 + 命名一步到位（小说/三部曲项目用这个，直接得到《书名》epNN__标题.mp3）
+# 标题取自 scripts/epNN.script.json 的 title，缺失时回落 episodes.json 的 topic
+$PY $S/merge_and_name.py <工作目录> --prefix "《书名》" --album "《书名》拆书电台"
+$PY $S/merge_and_name.py <工作目录> --prefix "《书名》" --dry-run        # 只看命名规划
+$PY $S/merge_and_name.py <工作目录> --prefix "《书名》" --only 03 05     # 只合指定集
 
 # 重新生成 RSS 与索引，使文件名/标题一致
 $PY $S/make_feed.py --dir <工作目录>/output \
@@ -478,6 +514,15 @@ $PY $S/merge_audio.py --manifest ... --out ep01.mp3 --bgm bgm.mp3 --bgm-db -26 -
 
 # 强制重渲某集（忽略缓存）
 $PY $S/tts_render.py --script ep01.script.json --out-dir out --force
+
+# 小说/三部曲：按册切集级素材块（一块=一集）
+$PY $S/chunk_novel.py --input book.txt --out chunks --episodes 4,3,3 --labels "第一部,第二部,第三部"
+
+# 小说/三部曲：合并 + 按标题命名一步到位
+$PY $S/merge_and_name.py <工作目录> --prefix "《书名》" --album "《书名》拆书电台"
+
+# 只检查命名规划（不真合并）
+$PY $S/merge_and_name.py <工作目录> --prefix "《书名》" --dry-run
 ```
 
 ---
@@ -500,6 +545,9 @@ $PY $S/tts_render.py --script ep01.script.json --out-dir out --force
     ├── podcast.xml             RSS 订阅源
     └── index.md                索引           ← 交付
 ```
+
+小说/三部曲项目若用 `merge_and_name.py`，成品名形如 `《书名》ep01__创意标题.mp3`
+（标题直接取 `scripts/ep01.script.json` 的 `title`，无需再跑 `rename_by_chapter.py`）。
 
 ---
 
