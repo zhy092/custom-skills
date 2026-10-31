@@ -29,6 +29,7 @@ WorkBuddy 沙箱内 CLI 安装 / 更新失败的「症状 → 根因 → 解法�
 
 - 语音引擎：默认 `edge-tts`（免费、无需 API Key），另支持阿里云百炼 Qwen-TTS、火山引擎豆包、MiniMax、OpenAI。
 - 产物命名：`ep{序号}_{章节范围}_{主题}.mp3`（按真实章节拆分）。
+- 小说 / 三部曲专用：`chunk_novel.py` 按「册」把长篇切成 7–9 万字集级素材块（一块 = 一集）；`merge_and_name.py` 合并 + 按脚本标题命名一步到位（`《书名》epNN__标题.mp3`），省掉"合并后忘跑重命名"。
 - 安装：把 `book-to-podcast/` 放进 `~/.workbuddy/skills/`，然后运行 `bash book-to-podcast/scripts/setup_env.sh`（自动建 venv 并装依赖，含完整静态 ffmpeg）。
 
 ### [github-skill-store](./github-skill-store/)
