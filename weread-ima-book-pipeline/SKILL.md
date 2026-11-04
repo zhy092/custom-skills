@@ -16,7 +16,7 @@ license: MIT
 
 | 依赖 | 怎么确认 | 缺了怎么办 |
 |---|---|---|
-| Chrome 已登录 weread.qq.com | `python3 scripts/wr_session.py` 输出 `OK ... skey长度=8` | 让用户在 Chrome 扫码登录，再重跑 |
+| Chrome 已登录 weread.qq.com | `python3 scripts/wr_session.py` 输出 `OK ...`，再用 `node scripts/wr_cookies_live.js` 刷新一次 | 让用户在 Chrome 扫码登录，再重跑 |
 | ima OpenAPI 凭证 | `~/.config/ima/{client_id,api_key}` 存在 | 到 https://ima.qq.com/agent-interface 取，**存文件不放 env** |
 | ima 知识库 ID | `ima_openapi.py folders` 有输出 | 用 `search_knowledge_base` 查库名 |
 | 渲染环境 | `book-to-podcast` skill 的 venv 可用 | 见该 skill |
@@ -33,6 +33,13 @@ python3 scripts/plan_books.py candidates.txt --json state/candidates.json
 - 搜索接口免登录就能用：`GET /web/search/global?keyword=`，返回 `books[].bookInfo`（bookId/title/author/newRating/newRatingDetail/publisher）。
 - 评分字段 `newRating` 是放大十倍的整数（879 = 87.9 分），`newRatingDetail.title` 是"好评如潮/神作"这种标签。
 - **查重必须做**：书名归一化（去《》、标点、空格、全半角 NFKC）后做包含比对，基准三处 = ima 文件夹 + 本地成品目录 + 书架。`norm()` 在 `ima_openapi.py` 里。
+
+
+### 登录态会「看着有效其实过期」
+
+- `wr_session.py` 从 Chrome 的 cookie 库解密，拿到的 `wr_skey` / `wr_fp` **可能是上一次会话的旧值**：浏览器用着正常，但直接调 API 会返回 `-2012 登录超时`。
+- 判断方法：用浏览器 context 打开书架，页内 `fetch('/web/shelf/sync')` 能拿到 `bookCount`，而 Python 调同一接口 401/超时 —— 就是这个问题。
+- 解法：跑 `node scripts/wr_cookies_live.js`，它用 Playwright 载入页面后把**运行时真实 cookie** 写回 `/tmp/wr_cookies3.json`，覆盖率 100%。抓取脚本也认这个文件。
 
 ### 2. 判断可读性（最容易翻车的一步）
 
