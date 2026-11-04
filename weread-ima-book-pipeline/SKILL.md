@@ -91,3 +91,16 @@ node scripts/grab_web.js <hash> "books/<书名>/raw" --max-flips 900
 
 每本书的阶段固定为：`候选 → 已批准 → 已建文件夹 → 抓取中 → 写作中 → 渲染中 → 已入库`。
 看板/清单页读 `state/candidates.json` 与 `state/folder_map.json`，别再手写状态。
+
+## 附：文件上传路径（原 ima-cos-upload 技能已并入此处）
+
+把音频/PDF 存进 ima 只有一条推荐路径，不需要 COS SDK、不需要 STS 凭证：
+
+1. `create_media` 传 `apply_upload_mode: 1`，拿到 `upload_url.presigned_url` 与 `auth_headers`（含 Content-Length，必须与 `file_size` 完全一致）；
+2. 对 `presigned_url` 发 HTTP PUT，body 是文件二进制，header 原样带上 `auth_headers`；
+3. `add_knowledge` 传 `media_id` + `folder_id` 归档；
+4. `get_knowledge_list(folder_id=...)` 看 `total_size` 是否等于预期条数，落位才算成功。
+
+- 预签名链接有效期约 12 小时（`url_expired_ts`），过期重新 `create_media`。
+- 若哪天不返回 `upload_url`（只给 `cos_credential`），才需要回退到 STS + COS SDK 上传。
+- 批量时每 5 个文件一批走完 1→2，再统一 3，往返最少。
